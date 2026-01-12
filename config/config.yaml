@@ -1,0 +1,146 @@
+# ==================== AKB48 视频总结系统配置 ====================
+
+# 视频输入配置
+input:
+  # 方式1：指定单个视频文件
+  # video_file: "test_video.mp4"
+  
+  # 方式2：指定视频文件夹（推荐）
+  video_folder: "./videos"
+  
+  # 支持的视频格式
+  video_extensions: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm", ".m4v"]
+  
+  # 是否递归扫描子文件夹
+  recursive: false
+  
+  # 处理模式
+  mode: "folder"  # "single" 或 "folder"
+
+# 输出目录
+output_dir: "./outputs"
+
+# Gemini API密钥文件路径
+gemini_api_key_file: "/home/ubuntu/.gemini_api_key"
+
+# 处理选项
+processing:
+  # 已处理的视频记录文件
+  processed_log: "./outputs/processed.json"
+  
+  # 是否跳过已处理的视频
+  skip_processed: true
+  
+  # 出错时是否继续处理下一个
+  continue_on_error: true
+  
+  # 🎬 视频处理模式
+  # true:  使用 Gemini 直接分析视频（快速，Gemini 扮演 AKB48 粉丝角色）
+  # false: 使用 Whisper 转录 + AI 总结（精确，使用自定义词汇表）
+  # 
+  # 推荐: 如果只需要总结，use_video_direct_analysis: true (快3-4倍)
+  #       如果需要完整转录，use_video_direct_analysis: false
+  use_video_direct_analysis: true
+  
+  # 🆕 视频加速倍数（1.0 = 不加速）
+  video_speedup: 2.0
+  
+  # 🆕 视频分辨率（LOW/MEDIUM/HIGH）
+  media_resolution: "LOW"
+
+  # 🆕 自动分段配置（未来功能）
+  auto_segment: false             # 启用自动分段
+  segment_threshold: 90           # 超过90分钟才分段（分钟）
+  segment_target_duration: 60     # 分段时，目标每段60分钟
+  segment_overlap: 30             # 段间重叠30秒
+
+# ==================== Whisper配置 ====================
+whisper:
+  model: "large-v3"
+  device: "cpu"
+  compute_type: "int8"
+
+  # 自定义词汇表（外部文件）
+  custom_vocabulary:
+    enabled: true
+    file: "vocabulary.txt"  # 相对于 config/ 目录
+
+  # 质量参数
+  quality:
+    beam_size: 5
+    best_of: 10
+    patience: 2.0
+    temperature: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+    compression_ratio_threshold: 2.4
+    
+  # VAD配置
+  vad:
+    enabled: true
+    threshold: 0.3
+    min_silence_duration_ms: 500
+
+# ==================== 总结模型配置 ====================
+# 优先级从上到下
+summarization_models:
+  # 第1优先：Gemini 3 Flash（最新最好）
+  - name: "gemini-3-flash-preview"
+    type: "gemini"
+    model_id: "gemini-3-flash-preview"
+    enabled: true
+    config:
+      temperature: 0.3
+      top_p: 0.85
+      top_k: 40
+      max_output_tokens: 16384
+    notes: "Gemini 3 预览版"
+  
+  # 第2优先：Gemini 2.5 Flash（备用）
+  - name: "gemini-2.5-flash"
+    type: "gemini"
+    model_id: "gemini-2.5-flash"
+    enabled: true
+    config:
+      temperature: 0.3
+      top_p: 0.85
+      top_k: 40
+      max_output_tokens: 16384
+    notes: "稳定模型，质量很好"
+  
+  # 第3优先：Gemini Flash-Lite（更多RPM）
+  - name: "gemini-2.5-flash-lite"
+    type: "gemini"
+    model_id: "gemini-2.5-flash-lite"
+    enabled: true
+    config:
+      temperature: 0.3
+      top_p: 0.85
+      top_k: 40
+      max_output_tokens: 16384
+    notes: "RPM更多(10 vs 5)，速度最快"
+  
+  # 第4备份：本地Ollama Qwen 14B
+  - name: "qwen-14b-q5"
+    type: "ollama"
+    model_id: "qwen2.5:14b-instruct-q5_K_M"
+    enabled: false  # 默认禁用，需要时手动启用
+    config:
+      temperature: 0.3
+      top_p: 0.85
+      top_k: 30
+      repeat_penalty: 1.2
+      num_predict: 2000
+      num_ctx: 8192
+    api_url: "http://localhost:11434/api/generate"
+    notes: "本地备份，无限使用，质量很好"
+
+# ==================== 时间轴配置 ====================
+timeline:
+  num_points: 10  # 生成多少个时间点
+
+# ==================== 输出配置 ====================
+output:
+  save_transcript: true
+  save_summary: true
+  save_timeline: true
+  save_youtube_comment: true
+  format: ["txt", "json"]  # 输出格式

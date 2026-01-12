@@ -1,0 +1,32 @@
+# ==================== 核心依赖 ====================
+# YAML 配置解析
+pyyaml>=6.0
+
+# Whisper 转录
+faster-whisper>=1.0.0
+
+# Gemini API
+google-generativeai>=0.8.0
+
+# ==================== 工具依赖 ====================
+# 监控守护进程
+watchdog>=3.0.0
+
+# HTTP 请求（Ollama）
+requests>=2.31.0
+
+# ==================== 可选依赖 ====================
+# 如果需要 GPU 加速 Whisper（可选）
+# torch>=2.0.0
+# torchaudio>=2.0.0
+
+# ==================== 说明 ====================
+# 安装命令：
+# pip3 install --break-system-packages -r requirements.txt
+#
+# 系统依赖：
+# - ffmpeg（必需，用于视频处理）
+# - ffprobe（必需，用于视频信息提取）
+#
+# 安装系统依赖（Ubuntu）：
+# sudo apt-get install ffmpeg

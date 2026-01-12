@@ -42,17 +42,8 @@ processing:
   #       如果需要完整转录，use_video_direct_analysis: false
   use_video_direct_analysis: true
   
-  # 🆕 视频加速倍数（1.0 = 不加速）
-  video_speedup: 2.0
-  
   # 🆕 视频分辨率（LOW/MEDIUM/HIGH）
   media_resolution: "LOW"
-
-  # 🆕 自动分段配置（未来功能）
-  auto_segment: false             # 启用自动分段
-  segment_threshold: 90           # 超过90分钟才分段（分钟）
-  segment_target_duration: 60     # 分段时，目标每段60分钟
-  segment_overlap: 30             # 段间重叠30秒
 
 # ==================== Whisper配置 ====================
 whisper:

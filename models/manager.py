@@ -100,7 +100,8 @@ class ModelManager:
     
     def summarize_from_video(
         self,
-        video_path: str
+        video_path: str,
+        fps: float = None  # 🆕 添加 fps 参数
     ) -> Tuple[Optional[str], Optional[str], Optional[float]]:
         """
         从视频直接生成总结
@@ -149,7 +150,8 @@ class ModelManager:
                     prompt,
                     model_config['model_id'],
                     model_config['config'],
-                    media_res
+                    media_res,
+                    fps  # 🆕 传递 fps 参数
                 )
                 
                 if summary:

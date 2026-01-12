@@ -12,6 +12,7 @@ __all__ = [
     'save_results',
     'VideoInfo',
     'speed_up_video',
+    'extract_audio',
     'create_timeline',
     'generate_youtube_comment',
     'generate_youtube_simple',

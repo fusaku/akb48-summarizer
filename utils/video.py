@@ -174,3 +174,77 @@ def check_ffprobe_available() -> bool:
         return True
     except:
         return False
+
+def extract_audio(input_path: str, speedup: float = 1.0) -> str:
+    """
+    提取视频的音频轨道（可选加速）
+    
+    Args:
+        input_path: 原始视频路径
+        speedup: 音频加速倍数（例如 2.0 表示 2 倍速）
+    
+    Returns:
+        音频文件路径（临时文件），失败则返回原路径
+    """
+    print(f"🎵 提取音频轨道...")
+    if speedup != 1.0:
+        print(f"   加速倍数: {speedup}x")
+    
+    # 创建临时文件
+    temp_file = tempfile.NamedTemporaryFile(
+        suffix='.mp3', 
+        delete=False
+    )
+    output_path = temp_file.name
+    temp_file.close()
+    
+    # 构建 ffmpeg 命令
+    cmd = [
+        'ffmpeg',
+        '-i', input_path,
+        '-vn',  # 不要视频轨道
+        '-acodec', 'libmp3lame',
+        '-q:a', '2',  # 高质量音频
+    ]
+    
+    # 如果需要加速
+    if speedup != 1.0:
+        if speedup <= 2.0:
+            audio_filter = f"atempo={speedup}"
+        else:
+            # 链式 atempo（> 2.0 需要多次）
+            audio_filter = f"atempo=2.0,atempo={speedup/2.0}"
+        cmd.extend(['-af', audio_filter])
+    
+    cmd.extend(['-y', output_path])
+    
+    # 执行命令（静默模式）
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False
+    )
+    
+    if result.returncode != 0:
+        print(f"⚠️  音频提取失败，使用原始视频")
+        try:
+            os.unlink(output_path)
+        except:
+            pass
+        return input_path
+    
+    # 检查输出文件
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        print(f"⚠️  音频文件无效，使用原始视频")
+        try:
+            os.unlink(output_path)
+        except:
+            pass
+        return input_path
+    
+    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"✅ 音频提取完成")
+    print(f"   大小: {file_size_mb:.1f} MB")
+    
+    return output_path

@@ -7,7 +7,15 @@ import os
 from typing import Dict, Any, Tuple
 from pathlib import Path
 
-from utils import save_results, create_timeline, generate_youtube_simple, VideoInfo, speed_up_video
+from utils import (
+    save_results, 
+    create_timeline, 
+    generate_youtube_simple, 
+    VideoInfo, 
+    speed_up_video,
+    extract_audio
+    )
+from utils.video_optimizer import VideoOptimizer
 from .transcriber import Transcriber
 from .summarizer import Summarizer
 from models import ModelManager
@@ -28,6 +36,7 @@ class VideoProcessor:
         
         # 初始化模块
         self.model_manager = ModelManager(config)
+        self.optimizer = VideoOptimizer() # 🆕 添加优化器
         
         # 只在 Whisper 模式下初始化转录器
         self.transcriber = None
@@ -74,29 +83,47 @@ class VideoProcessor:
     def _process_video_direct(self, video_path: str) -> bool:
         """视频直传模式"""
         try:
-            # 视频加速
+            # 🆕 获取优化策略
+            strategy = self.optimizer.get_strategy(video_path)
+            
+            if strategy is None:
+                print(f"\n❌ 视频过长，无法处理")
+                return False
+            
+            # 🆕 根据策略处理视频
             original_path = video_path
             is_temp = False
+            processed_path = video_path
             
-            speedup = self.config.get('processing', {}).get('video_speedup', 1.0)
-            if speedup != 1.0:
-                video_path = speed_up_video(video_path, speedup)
-                is_temp = (video_path != original_path)
+            # 处理：加速或提取音频
+            if strategy['audio_only']:
+                # 纯音频模式
+                print(f"\n🎵 第4档: 提取纯音频")
+                processed_path = extract_audio(video_path, strategy['speedup'])
+                is_temp = (processed_path != original_path)
+            elif strategy['speedup'] != 1.0:
+                # 视频加速
+                print(f"\n⚡ 视频加速: {strategy['speedup']}x")
+                processed_path = speed_up_video(video_path, strategy['speedup'])
+                is_temp = (processed_path != original_path)
             
-            # 调用 API 生成
-            print(f"\n📹 分析视频: {os.path.basename(original_path)}")
-            full_response, model_name, duration = self.model_manager.summarize_from_video(video_path)
+            # 🆕 调用 API 生成（传递 fps 参数）
+            print(f"\n📹 分析{'音频' if strategy['audio_only'] else '视频'}: {os.path.basename(original_path)}")
+            full_response, model_name, duration = self.model_manager.summarize_from_video(
+                processed_path,
+                fps=strategy['fps']  # 🆕 传递 fps
+            )
             
             # 清理临时文件
             if is_temp:
                 try:
-                    os.unlink(video_path)
-                    print(f"   🗑️  已清理临时视频文件")
+                    os.unlink(processed_path)
+                    print(f"   🗑️  已清理临时文件")
                 except:
                     pass
-            
+                
             if not full_response:
-                print(f"\n❌ 视频分析失败")
+                print(f"\n❌ {'音频' if strategy['audio_only'] else '视频'}分析失败")
                 return False
             
             # 分割两个版本
@@ -126,7 +153,7 @@ class VideoProcessor:
             print(f"{'='*70}\n")
             
             # 保存结果
-            transcript = "[视频直传模式 - 无文字转录]"
+            transcript = f"[{'纯音频' if strategy['audio_only'] else '视频直传'}模式 - 无文字转录]"
             timeline = []
             
             output_dir = self.config['output_dir']

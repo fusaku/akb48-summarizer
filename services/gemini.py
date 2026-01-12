@@ -77,7 +77,8 @@ class GeminiClient:
         prompt: str,
         model_id: str,
         config: dict,
-        media_resolution: str = "MEDIUM"
+        media_resolution: str = "MEDIUM",
+        fps: float = None
     ) -> Tuple[Optional[str], Optional[float]]:
         """
         从视频生成内容
@@ -147,9 +148,35 @@ class GeminiClient:
             # 生成内容
             print(f"   ⏳ 正在分析视频并生成总结...")
             
+            # 🆕 根据 fps 参数决定使用哪种方式
+            if fps is not None:
+                # 使用自定义 fps
+                print(f"   📊 使用自定义采样率: {fps} fps")
+                contents = types.Content(
+                    parts=[
+                        types.Part(
+                            file_data=types.FileData(file_uri=video_file.uri),
+                            video_metadata=types.VideoMetadata(fps=fps)  # 🆕 动态 fps
+                        ),
+                        types.Part(text=prompt)
+                    ]
+                )
+            else:
+                # 使用默认 fps（Gemini 自动决定）
+                print(f"   📊 使用默认采样率（1.0 fps）")
+                contents = types.Content(
+                    parts=[
+                        types.Part(
+                            file_data=types.FileData(file_uri=video_file.uri),
+                            video_metadata=types.VideoMetadata(fps=1.0)  # 🆕 明确设置 1.0
+                        ),
+                        types.Part(text=prompt)
+                    ]
+                )
+            
             response = self.client.models.generate_content(
                 model=model_id,
-                contents=[video_file, prompt],
+                contents=contents,
                 config=types.GenerateContentConfig(
                     temperature=config.get('temperature', 0.3),
                     top_p=config.get('top_p', 0.85),

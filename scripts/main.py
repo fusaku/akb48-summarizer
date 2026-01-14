@@ -5,6 +5,7 @@
 
 import os
 import sys
+import oci
 from datetime import datetime
 from pathlib import Path
 
@@ -140,6 +141,92 @@ def main():
     print(f"\n📁 输出目录: {config['output_dir']}")
     print(f"{'='*70}")
 
+    # 清理存储桶
+    if 'oracle_download' in config:
+        print(f"\n{'='*70}")
+        print(f"🗑️  清理存储桶")
+        print(f"{'='*70}\n")
+        
+        deleted = cleanup_bucket_after_processing(config)
+        
+        if deleted > 0:
+            print(f"\n✅ 已删除 {deleted} 个已处理的视频")
+
+def cleanup_bucket_after_processing(config):
+    """处理完成后清理存储桶"""
+    try:
+        # 读取 Oracle 配置
+        oracle_config = config.get('oracle_download', {})
+
+        # 【新增】检查是否启用自动清理
+        if not oracle_config.get('auto_cleanup', False):
+            print(f"   ⏭️  跳过清理（未启用 auto_cleanup）")
+            return 0
+        
+        # 读取 key 文件
+        key_file = Path(__file__).parent.parent / "config" / "bucket_credentials.key"
+        if not key_file.exists():
+            print(f"   ⏭️  跳过清理（未找到配置文件）")
+            return 0
+        
+        with open(key_file, 'r') as f:
+            lines = [line.strip() for line in f.readlines()]
+            namespace = lines[0]
+            bucket_name = lines[1]
+        
+        video_prefix = oracle_config.get('video_prefix', 'showroom/videos/')
+        video_exts = oracle_config.get('video_extensions', ['.mp4'])
+        download_folder = Path(oracle_config.get('download_folder', './videos')).expanduser()
+        
+        # 连接 Oracle
+        oci_config = oci.config.from_file()
+        client = oci.object_storage.ObjectStorageClient(oci_config)
+        
+        # 列出视频
+        response = client.list_objects(
+            namespace_name=namespace,
+            bucket_name=bucket_name,
+            prefix=video_prefix
+        )
+        
+        videos = [
+            obj.name for obj in response.data.objects
+            if any(obj.name.lower().endswith(ext) for ext in video_exts)
+        ]
+        
+        if not videos:
+            print(f"   ℹ️  存储桶中没有视频")
+            return 0
+        
+        print(f"   📋 检查 {len(videos)} 个视频")
+        
+        output_dir = config['output_dir']
+        deleted_count = 0
+        
+        for video_name in videos:
+            filename = video_name.split('/')[-1]
+            video_stem = Path(filename).stem
+            
+            # 检查是否已处理
+            has_output = any(Path(output_dir).glob(f"{video_stem}_*.txt"))
+            
+            if has_output:
+                print(f"   🗑️  删除: {filename}")
+                try:
+                    client.delete_object(
+                        namespace_name=namespace,
+                        bucket_name=bucket_name,
+                        object_name=video_name
+                    )
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"      ⚠️ 删除失败: {e}")
+        
+        return deleted_count
+        
+    except Exception as e:
+        print(f"   ⚠️ 清理出错: {e}")
+        return 0
 
 if __name__ == "__main__":
     try:

@@ -135,3 +135,14 @@ output:
   save_timeline: true
   save_youtube_comment: true
   format: ["txt", "json"]  # 输出格式
+
+# ==================== Oracle 对象存储下载配置 ====================
+oracle_download:
+  download_folder: "~/akb48-summarizer/videos"         # 下载到项目的 videos/ 目录
+  video_prefix: "showroom/videos/"    # 存储桶中的路径前缀
+  video_extensions:
+    - .mp4
+    - .mkv
+    - .avi
+    - .mov
+  auto_cleanup: true    # 【新增】是否自动清理存储桶

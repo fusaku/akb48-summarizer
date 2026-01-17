@@ -106,7 +106,12 @@ class GeminiClient:
                 '.flv': 'video/x-flv',
                 '.wmv': 'video/x-ms-wmv',
                 '.webm': 'video/webm',
-                '.m4v': 'video/mp4'
+                '.m4v': 'video/mp4',
+                # 音频格式 ← 加这些!
+                '.mp3': 'audio/mpeg',
+                '.wav': 'audio/wav',
+                '.m4a': 'audio/mp4',
+                '.aac': 'audio/aac',
             }
             mime_type = mime_types.get(ext, 'video/mp4')
             

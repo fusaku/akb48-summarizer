@@ -173,6 +173,27 @@ def main():
             import traceback
             traceback.print_exc()
 
+    # 新增：Git 仓库更新
+    if 'git_update' in config:
+        print(f"\n{'='*70}")
+        print(f"📦 更新 Git 仓库")
+        print(f"{'='*70}\n")
+        
+        try:
+            # 动态导入避免循环依赖
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "update_git",
+                Path(__file__).parent / "update_git.py"
+            )
+            git_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(git_module)
+            
+            git_module.update_all_to_git()
+        except Exception as e:
+            print(f"⚠️  Git 更新出错: {e}")
+            import traceback
+            traceback.print_exc()
 def cleanup_bucket_after_processing(config):
     """处理完成后清理存储桶"""
     try:

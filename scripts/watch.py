@@ -91,6 +91,18 @@ class VideoHandler(FileSystemEventHandler):
         
         self.process_videos()
     
+    def schedule_retry(self, delay=30):
+        """延迟重试"""
+        import threading
+
+        def retry():
+            time.sleep(delay)
+            if self.pending_files and not self.processing:
+                self.log(f"🔄 自动重试处理 {len(self.pending_files)} 个待处理文件")
+                self.process_videos()
+
+        threading.Thread(target=retry, daemon=True).start()
+
     def process_videos(self):
         """处理待处理的视频"""
         if self.processing:
@@ -117,8 +129,9 @@ class VideoHandler(FileSystemEventHandler):
                     incomplete_files.append(filepath)
             
             if incomplete_files:
-                self.log(f"⚠️  {len(incomplete_files)} 个文件尚未完全写入，稍后重试")
+                self.log(f"⚠️  {len(incomplete_files)} 个文件尚未完全写入,30秒后重试")
                 self.processing = False
+                self.schedule_retry(delay=30)
                 return
             
             self.log("="*70)

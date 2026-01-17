@@ -153,7 +153,7 @@ class VideoProcessor:
             print(f"{'='*70}\n")
             
             # 保存结果
-            transcript = f"[{'纯音频' if strategy['audio_only'] else '视频直传'}模式 - 无文字转录]"
+            transcript = f"[{'音声のみ' if strategy['audio_only'] else '動画直接分析'}モード - 文字起こしなし]"
             timeline = []
             
             output_dir = self.config['output_dir']

@@ -152,6 +152,27 @@ def main():
         if deleted > 0:
             print(f"\n✅ 已删除 {deleted} 个已处理的视频")
 
+    if 'youtube_description_update' in config:
+        print(f"\n{'='*70}")
+        print(f"📝 更新 YouTube 视频简介")
+        print(f"{'='*70}\n")
+        
+        try:
+            # 动态导入避免循环依赖
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "update_description", 
+                Path(__file__).parent / "update_description.py"
+            )
+            update_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(update_module)
+            
+            update_module.update_all_descriptions()
+        except Exception as e:
+            print(f"⚠️  简介更新出错: {e}")
+            import traceback
+            traceback.print_exc()
+
 def cleanup_bucket_after_processing(config):
     """处理完成后清理存储桶"""
     try:
@@ -213,12 +234,29 @@ def cleanup_bucket_after_processing(config):
             if has_output:
                 print(f"   🗑️  删除: {filename}")
                 try:
+                    # 删除视频文件
                     client.delete_object(
                         namespace_name=namespace,
                         bucket_name=bucket_name,
                         object_name=video_name
                     )
                     deleted_count += 1
+
+                    # 删除对应的 .uploaded 标记文件
+                    marker_name = video_name + '.uploaded'
+                    try:
+                        client.delete_object(
+                            namespace_name=namespace,
+                            bucket_name=bucket_name,
+                            object_name=marker_name
+                        )
+                        print(f"      ✅ 已删除标记文件")
+                    except oci.exceptions.ServiceError as e:
+                        if e.status == 404:
+                            pass  # 标记文件不存在,忽略
+                        else:
+                            print(f"      ⚠️ 标记文件删除失败: {e}")
+
                 except Exception as e:
                     print(f"      ⚠️ 删除失败: {e}")
         

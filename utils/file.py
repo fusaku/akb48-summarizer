@@ -169,32 +169,33 @@ def save_results(
     video_name = Path(video_path).stem
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # 文本文件
-    txt_file = os.path.join(output_dir, f"{video_name}_{timestamp}.txt")
-    with open(txt_file, 'w', encoding='utf-8') as f:
+    # 文件1: 详细版
+    detailed_txt = os.path.join(output_dir, f"{video_name}_{timestamp}_detailed.txt")
+    with open(detailed_txt, 'w', encoding='utf-8') as f:
         f.write("="*70 + "\n")
         f.write(f"動画: {os.path.basename(video_path)}\n")
         f.write(f"生成時間: {datetime.now()}\n")
         f.write(f"使用モデル: {model_name}\n")
         f.write("="*70 + "\n\n")
-        
+
         f.write("【AI要約（詳細版）】\n")
         f.write("-"*70 + "\n")
         f.write(summary + "\n\n")
-        
-        f.write("【YouTube コメント用（簡潔版）】\n")
-        f.write("-"*70 + "\n")
-        f.write(youtube_comment + "\n\n")
-        
+
         f.write("【タイムライン】\n")
         f.write("-"*70 + "\n")
         for item in timeline:
             f.write(f"{item['time']} - {item['text']}\n")
         f.write("\n")
-        
+
         f.write("【完全な文字起こし】\n")
         f.write("-"*70 + "\n")
         f.write(transcript + "\n")
+
+    # 文件2: YouTube版
+    youtube_txt = os.path.join(output_dir, f"{video_name}_{timestamp}_youtube.txt")
+    with open(youtube_txt, 'w', encoding='utf-8') as f:
+        f.write(youtube_comment)
     
     # JSON文件
     json_file = os.path.join(output_dir, f"{video_name}_{timestamp}.json")
@@ -213,4 +214,4 @@ def save_results(
             }
         }, f, ensure_ascii=False, indent=2)
     
-    return txt_file, json_file
+    return detailed_txt, youtube_txt, json_file

@@ -156,6 +156,38 @@ class OracleBucketDownloader:
             if self.download_video(video_name, local_path):
                 success_count += 1
         
+                # 下载对应的 .uploaded 标记文件
+                marker_name = video_name + '.uploaded'
+                marker_local_path = local_path.with_suffix('.mp4.uploaded')
+                
+                try:
+                    # 检查标记文件是否存在
+                    self.client.head_object(
+                        namespace_name=NAMESPACE,
+                        bucket_name=BUCKET_NAME,
+                        object_name=marker_name
+                    )
+                    
+                    # 如果存在就下载
+                    response = self.client.get_object(
+                        namespace_name=NAMESPACE,
+                        bucket_name=BUCKET_NAME,
+                        object_name=marker_name
+                    )
+                    
+                    with open(marker_local_path, 'wb') as f:
+                        for chunk in response.data.raw.stream(1024 * 1024, decode_content=False):
+                            f.write(chunk)
+                    
+                    print(f"✅ 已下载标记文件: {marker_local_path.name}")
+                except oci.exceptions.ServiceError as e:
+                    if e.status == 404:
+                        print(f"ℹ️  未找到标记文件 (可能是旧视频)")
+                    else:
+                        print(f"⚠️  标记文件下载失败: {e}")
+                except Exception as e:
+                    print(f"⚠️  标记文件下载失败: {e}")
+
         print(f"\n{'='*70}")
         print(f"✅ 下载完成: {success_count}/{len(videos)} 个文件")
         print(f"📁 保存在: {DOWNLOAD_FOLDER.absolute()}")

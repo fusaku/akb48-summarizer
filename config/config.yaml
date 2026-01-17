@@ -146,3 +146,46 @@ oracle_download:
     - .avi
     - .mov
   auto_cleanup: true    # 【新增】是否自动清理存储桶
+
+# ==================== YouTube 简介更新配置 ====================
+youtube_description_update:
+  enabled: true  # 是否启用自动更新简介
+  
+  # 认证文件路径
+  credentials_dir: "./config/credentials/autoupsr"
+  client_secret_file: "client_secret.json"
+  token_file: "youtube_token.pickle"
+  
+  # 简介内容来源
+  source_dir: "./outputs"  # _detailed.txt 文件所在目录
+  source_pattern: "*_detailed.txt"  # 文件匹配模式
+  
+  # 简介格式
+  separator: "\n\n==================================================\n\n"
+  max_length: 5000  # YouTube 简介最大长度
+  
+  # 标记文件
+  marker_suffix: ".description_updated"  # 已更新标记
+
+  # ==================== Git 更新配置 ====================
+# 将总结文件推送到 GitHub Pages 仓库
+
+git_update:
+  # 是否启用 Git 更新功能
+  enabled: true
+  
+  # Git 仓库路径（绝对路径）
+  git_repo_path: "/home/ubuntu/fusaku.github.io"
+  
+  # 总结文件目录（相对于仓库根目录）
+  summaries_dir: "summaries"
+  
+  # 目标文件扩展名
+  file_extension: ".txt"
+  
+  # Commit 信息模板
+  # 可用变量: {video_id}, {video_title}
+  commit_message_template: "Add summary: {video_title} ({video_id})"
+  
+  # Git 更新完成标记文件后缀
+  marker_suffix: ".git_updated"

@@ -157,13 +157,14 @@ class VideoProcessor:
             timeline = []
             
             output_dir = self.config['output_dir']
-            txt_file, json_file = save_results(
+            detailed_txt, youtube_txt, json_file = save_results(
                 original_path, transcript, detailed_version, timeline,
                 youtube_version, model_name, output_dir
             )
             
             print(f"💾 结果已保存:")
-            print(f"   📄 {txt_file}")
+            print(f"   📄 详细版: {os.path.basename(detailed_txt)}")
+            print(f"   📺 YouTube版: {os.path.basename(youtube_txt)}")
             
             return True
             
@@ -229,14 +230,15 @@ class VideoProcessor:
             print(f"\n💾 保存结果...")
             
             output_dir = self.config['output_dir']
-            txt_file, json_file = save_results(
+            detailed_txt, youtube_txt, json_file = save_results(
                 video_path, transcript, summary, timeline,
                 youtube_comment, model_name, output_dir
             )
             
             print(f"✅ 结果已保存:")
-            print(f"   📄 {txt_file}")
-            print(f"   📊 {json_file}")
+            print(f"   📄 详细版: {os.path.basename(detailed_txt)}")
+            print(f"   📺 YouTube版: {os.path.basename(youtube_txt)}")
+            print(f"   📊 JSON: {os.path.basename(json_file)}")
             
             return True
             

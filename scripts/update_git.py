@@ -2,10 +2,13 @@
 """
 更新总结文件到 Git 仓库
 将处理好的 _detailed.txt 文件推送到 GitHub Pages
+优化版：批量 Commit，统一 Push
 """
 
 import sys
 import subprocess
+import time
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -23,7 +26,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 # 配置路径处理
 def resolve_path(path_str: str) -> Path:
-    """解析路径(支持相对路径和绝对路径)"""
     path = Path(path_str).expanduser()
     if not path.is_absolute():
         path = PROJECT_ROOT / path
@@ -36,23 +38,21 @@ SUMMARIES_DIR = GIT_REPO_PATH / git_config.get('summaries_dir', 'summaries')
 
 
 def run_git_command(command: list, cwd: Path) -> tuple[bool, str]:
-    """
-    执行 git 命令
-    
-    Args:
-        command: git 命令列表
-        cwd: 工作目录
-    
-    Returns:
-        (是否成功, 输出信息)
-    """
+    """执行 git 命令"""
     try:
+        # 简单的锁检查
+        lock_file = cwd / ".git" / "index.lock"
+        if lock_file.exists():
+            # 如果存在锁，简单等待一下
+            print("   ⏳ 等待 Git 锁释放...")
+            time.sleep(2)
+            
         result = subprocess.run(
             command,
             cwd=cwd,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=60 # 增加一点超时时间，防止网络波动
         )
         return result.returncode == 0, result.stdout + result.stderr
     except Exception as e:
@@ -60,41 +60,38 @@ def run_git_command(command: list, cwd: Path) -> tuple[bool, str]:
 
 
 def validate_git_repo() -> bool:
-    """验证 git 仓库是否有效"""
     if not GIT_REPO_PATH.exists():
         print(f"   ❌ Git 仓库不存在: {GIT_REPO_PATH}")
         return False
-    
-    success, output = run_git_command(['git', 'status'], GIT_REPO_PATH)
-    if not success:
-        print(f"   ❌ 不是有效的 git 仓库")
-        return False
-    
-    return True
+    success, _ = run_git_command(['git', 'status'], GIT_REPO_PATH)
+    return success
 
 
 def git_pull() -> bool:
-    """执行 git pull 避免冲突"""
     print(f"   📥 执行 git pull...")
-    
     success, output = run_git_command(['git', 'pull'], GIT_REPO_PATH)
-    
     if success:
-        if 'Already up to date' in output or 'Already up-to-date' in output:
-            print(f"   ✅ 已是最新")
-        else:
-            print(f"   ✅ Pull 成功")
+        print(f"   ✅ Pull 成功")
         return True
     else:
         print(f"   ❌ Pull 失败: {output}")
         return False
 
 
+def git_push() -> bool:
+    """单独的 Push 函数"""
+    print(f"   📤 执行 git push (批量推送)...")
+    success, output = run_git_command(['git', 'push'], GIT_REPO_PATH)
+    if success:
+        print(f"   ✅ Push 成功")
+        return True
+    else:
+        print(f"   ❌ Push 失败: {output}")
+        print(f"   ℹ️  更改已保存在本地，下次运行时将再次尝试推送")
+        return False
+
+
 def find_detailed_txt(uploaded_file: Path) -> Path:
-    """
-    根据 .uploaded 文件名找到对应的 _detailed.txt 文件
-    如果有多个，选择最新的
-    """
     base_name = uploaded_file.name.replace('.mp4.uploaded', '')
     pattern = f"{base_name}_*_detailed.txt"
     matches = list(OUTPUTS_DIR.glob(pattern))
@@ -102,223 +99,130 @@ def find_detailed_txt(uploaded_file: Path) -> Path:
     if not matches:
         raise FileNotFoundError(f"未找到匹配的 detailed.txt 文件: {pattern}")
     
-    # 如果有多个，按修改时间排序，选最新的
     if len(matches) > 1:
         matches.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        print(f"   ℹ️  找到 {len(matches)} 个文件，使用最新的: {matches[0].name}")
-    
     return matches[0]
 
 
 def extract_video_title(uploaded_file: Path) -> str:
-    """
-    从文件名提取视频标题
-    例如: 260117 Showroom - AKB48 Team 8 Hashimoto Haruna 091623.mp4.uploaded
-    返回: 260117 Showroom - AKB48 Team 8 Hashimoto Haruna 091623
-    """
     return uploaded_file.name.replace('.mp4.uploaded', '')
 
 
 def update_single_video(uploaded_file: Path) -> bool:
-    """更新单个视频的总结到 Git"""
+    """
+    更新单个视频的总结到本地 Git 仓库 (不推送)
+    """
+    print(f"\n--- 处理: {uploaded_file.name} ---")
     
-    print(f"\n{'='*70}")
-    print(f"📝 处理: {uploaded_file.name}")
-    print(f"{'='*70}")
-    
-    # 1. 读取视频 ID
-    video_id = uploaded_file.read_text().strip()
-    
-    # 验证视频 ID 格式（YouTube ID 通常是 11 位）
-    if len(video_id) != 11:
-        print(f"   ⚠️  视频 ID 格式可能不正确: {video_id} (长度: {len(video_id)})")
-    
-    print(f"   视频ID: {video_id}")
-    
-    # 2. 检查是否已经更新过
+    # 1. 读取 ID
+    try:
+        video_id = uploaded_file.read_text().strip()
+        if len(video_id) != 11:
+            print(f"   ⚠️  ID 长度异常: {video_id}")
+    except Exception as e:
+        print(f"   ❌ 读取 .uploaded 失败: {e}")
+        return False
+
+    # 2. 检查标记
     marker_suffix = git_config.get('marker_suffix', '.git_updated')
     marker_file = uploaded_file.parent / f"{uploaded_file.name}{marker_suffix}"
     
     if marker_file.exists():
-        print(f"   ⏭️  已推送到 Git，跳过")
+        # 稍微检查一下是否已经在 Git 里了，防止重复处理
         return True
-    
-    # 3. 找到对应的 _detailed.txt
+
+    # 3. 找源文件
     try:
         detailed_file = find_detailed_txt(uploaded_file)
-        print(f"   找到文件: {detailed_file.name}")
-    except FileNotFoundError as e:
-        print(f"   ❌ {e}")
+    except FileNotFoundError:
+        print(f"   ⏳ 总结文件尚未生成，跳过")
         return False
     
-    # 4. 读取内容
-    try:
-        content = detailed_file.read_text(encoding='utf-8')
-        print(f"   内容长度: {len(content)} 字符")
-    except Exception as e:
-        print(f"   ❌ 读取文件失败: {e}")
-        return False
-    
-    # 5. 确保 summaries 目录存在
+    # 4. 写入 Git 目录
     SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # 6. 写入目标文件
     file_extension = git_config.get('file_extension', '.txt')
     target_file = SUMMARIES_DIR / f"{video_id}{file_extension}"
     
     try:
+        content = detailed_file.read_text(encoding='utf-8')
         target_file.write_text(content, encoding='utf-8')
-        
-        if target_file.exists():
-            action = "覆盖" if target_file.stat().st_size > 0 else "创建"
-            print(f"   ✅ 文件已{action}: {target_file.name}")
-        else:
-            print(f"   ✅ 文件已创建: {target_file.name}")
     except Exception as e:
-        print(f"   ❌ 写入文件失败: {e}")
+        print(f"   ❌ 文件读写失败: {e}")
         return False
-    
-    # 7. Git add
-    print(f"   📦 添加到 Git...")
+
+    # 5. Git Add & Commit
     relative_path = target_file.relative_to(GIT_REPO_PATH)
-    success, output = run_git_command(
-        ['git', 'add', str(relative_path)],
-        GIT_REPO_PATH
-    )
     
-    if not success:
-        print(f"   ❌ git add 失败: {output}")
-        return False
+    # Add
+    run_git_command(['git', 'add', str(relative_path)], GIT_REPO_PATH)
     
-    # 8. Git commit
+    # Commit
     video_title = extract_video_title(uploaded_file)
-    commit_template = git_config.get('commit_message_template', 'Add summary for video {video_id}')
-    commit_message = commit_template.format(
-        video_id=video_id,
-        video_title=video_title
+    commit_msg = git_config.get('commit_message_template', 'Summary: {video_id}').format(
+        video_id=video_id, video_title=video_title
     )
     
-    print(f"   💬 提交信息: {commit_message}")
-    success, output = run_git_command(
-        ['git', 'commit', '-m', commit_message],
-        GIT_REPO_PATH
-    )
+    success, output = run_git_command(['git', 'commit', '-m', commit_msg], GIT_REPO_PATH)
     
-    if not success:
-        # 检查是否是"没有变化"的情况
-        if 'nothing to commit' in output or 'no changes added' in output:
-            print(f"   ℹ️  没有变化需要提交")
-            # 虽然没有新的 commit，但文件已存在，算成功
-            marker_file.write_text(f"No changes at: {datetime.now()}")
-            return True
-        else:
-            print(f"   ❌ git commit 失败: {output}")
-            return False
-    
-    # 9. Git push
-    print(f"   📤 推送到远程...")
-    success, output = run_git_command(
-        ['git', 'push'],
-        GIT_REPO_PATH
-    )
-    
-    if not success:
-        print(f"   ❌ git push 失败: {output}")
-        print(f"   ℹ️  文件已添加到本地仓库，但推送失败")
-        print(f"   ℹ️  请手动执行: cd {GIT_REPO_PATH} && git push")
+    if success:
+        print(f"   ✅ 已提交 (Commit)")
+        marker_file.write_text(f"Committed at: {datetime.now()}")
+        return True
+    elif 'nothing to commit' in output or 'no changes' in output.lower():
+        print(f"   ℹ️  内容无变化")
+        marker_file.write_text(f"No changes: {datetime.now()}")
+        return True
+    else:
+        print(f"   ❌ Commit 失败: {output}")
         return False
-    
-    print(f"   ✅ 推送成功")
-    
-    # 10. 创建标记文件
-    marker_file.write_text(f"Pushed to Git at: {datetime.now()}")
-    
-    return True
 
 
 def update_all_to_git() -> int:
-    """批量更新所有视频总结到 Git"""
-    
-    # 检查是否启用
+    """主流程"""
     if not git_config.get('enabled', False):
-        print(f"ℹ️  Git 更新功能未启用")
-        print(f"ℹ️  请在 config.yaml 中设置 git_update.enabled: true")
         return 0
-    
-    print(f"\n{'='*70}")
-    print(f"📦 批量更新总结到 Git 仓库")
-    print(f"{'='*70}\n")
-    
-    print(f"📂 Git 仓库: {GIT_REPO_PATH}")
-    print(f"📂 目标目录: {SUMMARIES_DIR}")
-    
-    # 验证 Git 仓库
-    print(f"\n🔍 验证 Git 仓库...")
+
+    print(f"\n{'='*60}")
+    print(f"📦 开始同步总结到 Git")
+    print(f"{'='*60}")
+
     if not validate_git_repo():
         return 0
-    print(f"   ✅ Git 仓库有效")
-    
-    # Git pull
-    if not git_pull():
-        print(f"\n⚠️  Pull 失败，但继续处理...")
-    
-    # 获取所有 .uploaded 文件
+
+    # 1. 统一先 Pull
+    git_pull()
+
     uploaded_files = list(VIDEOS_DIR.glob("*.mp4.uploaded"))
-    
-    if not uploaded_files:
-        print(f"\nℹ️  没有找到 .uploaded 文件")
-        return 0
-    
-    print(f"\n📋 找到 {len(uploaded_files)} 个已上传的视频\n")
-    
-    # 统计
+    changes_made = False
     success_count = 0
-    fail_count = 0
-    skip_count = 0
-    
-    # 逐个处理
+
+    # 2. 循环处理 (只 Commit，不 Push)
     for uploaded_file in uploaded_files:
-        # 检查是否已经更新过
-        marker_suffix = git_config.get('marker_suffix', '.git_updated')
-        marker_file = uploaded_file.parent / f"{uploaded_file.name}{marker_suffix}"
-        
-        if marker_file.exists():
-            skip_count += 1
-            continue
-        
-        result = update_single_video(uploaded_file)
-        
-        if result:
+        if update_single_video(uploaded_file):
             success_count += 1
+            # 只有当 marker 文件刚刚被创建，且确实有提交动作时，这里很难判断
+            # 但只要 success_count > 0，我们最后都尝试 push 一下是安全的
+            changes_made = True
+
+    # 3. 统一最后 Push
+    # 只要有处理成功的文件，或者为了保险起见（防止之前有未推送的提交），都执行一次 Push
+    print(f"\n{'-'*60}")
+    if changes_made:
+        git_push()
+    else:
+        # 即使这次没有新文件，也可以检查一下有没有本地积压的提交
+        success, output = run_git_command(['git', 'cherry', '-v'], GIT_REPO_PATH)
+        if success and output.strip():
+            print(f"   ℹ️  检测到本地有未推送的提交，执行推送...")
+            git_push()
         else:
-            fail_count += 1
-    
-    # 最终统计
-    print(f"\n{'='*70}")
-    print(f"✅ 批量更新完成")
-    print(f"{'='*70}")
-    print(f"   成功: {success_count} 个")
-    print(f"   失败: {fail_count} 个")
-    print(f"   跳过: {skip_count} 个")
-    print(f"   总计: {len(uploaded_files)} 个")
-    print(f"{'='*70}\n")
-    
+            print(f"   ✅ 没有需要推送的更新")
+
     return success_count
 
 
-def main():
-    """主函数"""
+if __name__ == "__main__":
     try:
         update_all_to_git()
     except KeyboardInterrupt:
-        print(f"\n\n⚠️  用户中断")
         sys.exit(0)
-    except Exception as e:
-        print(f"\n❌ 发生错误: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

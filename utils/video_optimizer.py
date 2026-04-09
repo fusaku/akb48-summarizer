@@ -13,11 +13,13 @@ class VideoOptimizer:
     # Token 消耗率（基于实测）
     TOKEN_RATE_VIDEO_FPS1 = 55      # 视频 fps=1.0 时，tokens/秒
     TOKEN_RATE_VIDEO_FPS05 = 27.5   # 视频 fps=0.5 时，tokens/秒
+    TOKEN_RATE_VIDEO_FPS025 = 13.75  # 视频 fps=0.25 时，tokens/秒
     TOKEN_RATE_AUDIO = 32           # 音频固定 tokens/秒
     
     # 总消耗率
     RATE_FPS1 = TOKEN_RATE_VIDEO_FPS1 + TOKEN_RATE_AUDIO    # 87 tokens/秒
     RATE_FPS05 = TOKEN_RATE_VIDEO_FPS05 + TOKEN_RATE_AUDIO  # 59.5 tokens/秒
+    RATE_FPS025 = TOKEN_RATE_VIDEO_FPS025 + TOKEN_RATE_AUDIO  # 45.75 tokens/秒
     RATE_AUDIO_ONLY = TOKEN_RATE_AUDIO                      # 32 tokens/秒
     
     # Token 限制
@@ -64,8 +66,10 @@ class VideoOptimizer:
             strategy = self._strategy_tier2(info)
         elif duration_minutes <= 120:
             strategy = self._strategy_tier3(info)
-        elif duration_minutes <= 240:
+        elif duration_minutes <= 170:
             strategy = self._strategy_tier4(info)
+        elif duration_minutes <= 240:
+            strategy = self._strategy_tier5(info)
         else:
             return self._reject_too_long(info)
         
@@ -125,9 +129,21 @@ class VideoOptimizer:
         """
         return {
             'speedup': 2.0,
+            'fps': 0.25,    # 降到 0.25 fps
+            'audio_only': False,
+            'description': '第4档: 2倍速 + fps=0.25'
+        }
+
+    def _strategy_tier5(self, info: VideoInfo) -> Dict[str, Any]:
+        """
+        第 5 档：170-240 分钟
+        2倍速 + 纯音频
+        """
+        return {
+            'speedup': 2.0,
             'fps': None,
-            'audio_only': True,  # 只保留音频
-            'description': '第4档: 2倍速 + 纯音频'
+            'audio_only': True,
+            'description': '第5档: 2倍速 + 纯音频'
         }
     
     def _reject_too_long(self, info: VideoInfo) -> None:
@@ -156,11 +172,10 @@ class VideoOptimizer:
         
         # 根据策略计算 token
         if strategy['audio_only']:
-            # 纯音频
             return processed_duration * self.RATE_AUDIO_ONLY
+        elif strategy['fps'] == 0.25:  # 新增
+            return processed_duration * self.RATE_FPS025  # 新增
         elif strategy['fps'] == 0.5:
-            # fps=0.5
             return processed_duration * self.RATE_FPS05
         else:
-            # fps=1.0（默认）
             return processed_duration * self.RATE_FPS1

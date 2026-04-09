@@ -45,6 +45,8 @@ processing:
   # 🆕 视频分辨率（LOW/MEDIUM/HIGH）
   media_resolution: "LOW"
 
+  # 🆕 当格式验证失败时，是否保存 AI 的原始输出
+  save_raw_on_fail: true 
 # ==================== Whisper配置 ====================
 whisper:
   model: "large-v3"

@@ -141,8 +141,9 @@ def save_results(
     timeline: List[Dict],
     youtube_comment: str,
     model_name: str,
-    output_dir: str = "./outputs"
-) -> tuple[str, str]:
+    output_dir: str = "./outputs",
+    raw_content: str = None  # 🆕 新增：接收 AI 原始不合规回复
+) -> tuple[str, str, str]:
     """
     保存结果（包括视频名）
     
@@ -214,4 +215,15 @@ def save_results(
             }
         }, f, ensure_ascii=False, indent=2)
     
+    if raw_content:
+        invalid_file = os.path.join(output_dir, f"{video_name}_{timestamp}_invalid.txt")
+        with open(invalid_file, 'w', encoding='utf-8') as f:
+            f.write(f"--- AI ORIGINAL INVALID OUTPUT ---\n")
+            f.write(f"Model: {model_name}\n")
+            f.write(f"Generated at: {datetime.now()}\n")
+            f.write(f"{'='*40}\n\n")
+            f.write(raw_content)
+        print(f"   ⚠️  原始不合规内容已保存: {os.path.basename(invalid_file)}")
+
+    # 这里的 return 要确保返回三个值（原代码返回了 detailed_txt, youtube_txt, json_file）
     return detailed_txt, youtube_txt, json_file

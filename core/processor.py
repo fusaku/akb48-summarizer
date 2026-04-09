@@ -128,15 +128,18 @@ class VideoProcessor:
             
             # 分割两个版本
             detailed_version, youtube_version = Summarizer.parse_dual_summary(full_response)
+            # 🆕 备份原始版本用于保存
+            invalid_raw_content = None
             
-            # 验证
+            # 2. 验证逻辑
             if not detailed_version or not youtube_version:
                 print(f"⚠️  分割失败，使用备用方案")
                 detailed_version = full_response
                 youtube_version = generate_youtube_simple(detailed_version)
-            
-            if not Summarizer.validate_youtube_format(youtube_version):
+                invalid_raw_content = full_response # 保存整个 AI 回复
+            elif not Summarizer.validate_youtube_format(youtube_version):
                 print(f"⚠️  YouTube 版格式验证失败，使用代码生成")
+                invalid_raw_content = youtube_version # 只保存那个格式不对的版本
                 youtube_version = generate_youtube_simple(detailed_version)
             
             # 显示结果
@@ -157,9 +160,13 @@ class VideoProcessor:
             timeline = []
             
             output_dir = self.config['output_dir']
+            # 从 config 获取开关（默认为 True）
+
+            save_raw_enabled = self.config.get('processing', {}).get('save_raw_on_fail', True)
             detailed_txt, youtube_txt, json_file = save_results(
                 original_path, transcript, detailed_version, timeline,
-                youtube_version, model_name, output_dir
+                youtube_version, model_name, output_dir,
+                raw_content=invalid_raw_content if save_raw_enabled else None # 🆕 传入原始文本
             )
             
             print(f"💾 结果已保存:")

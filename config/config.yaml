@@ -47,6 +47,8 @@ processing:
 
   # 🆕 当格式验证失败时，是否保存 AI 的原始输出
   save_raw_on_fail: true 
+  
+  transcribe_audio: true   # ← 新增
 # ==================== Whisper配置 ====================
 whisper:
   model: "large-v3"
@@ -84,7 +86,7 @@ summarization_models:
       temperature: 0.3
       top_p: 0.85
       top_k: 40
-      max_output_tokens: 16384
+      max_output_tokens: 65536
     notes: "Gemini 3 预览版"
   
   # 第2优先：Gemini 2.5 Flash（备用）
@@ -96,7 +98,7 @@ summarization_models:
       temperature: 0.3
       top_p: 0.85
       top_k: 40
-      max_output_tokens: 16384
+      max_output_tokens: 65536
     notes: "稳定模型，质量很好"
   
   # 第3优先：Gemini Flash-Lite（更多RPM）
@@ -108,7 +110,7 @@ summarization_models:
       temperature: 0.3
       top_p: 0.85
       top_k: 40
-      max_output_tokens: 16384
+      max_output_tokens: 65536
     notes: "RPM更多(10 vs 5)，速度最快"
   
   # 第4备份：本地Ollama Qwen 14B

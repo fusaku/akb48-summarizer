@@ -4,6 +4,7 @@
 """
 
 import os
+import threading
 from typing import Dict, Any, Tuple
 from pathlib import Path
 
@@ -96,16 +97,32 @@ class VideoProcessor:
             processed_path = video_path
             
             # 处理：加速或提取音频
+            # 并行处理：同时提取视频和音频
+            transcribe_enabled = self.config.get('processing', {}).get('transcribe_audio', False)
+            audio_path_for_transcribe = [None]  # 用list传引用
+
+            def prepare_audio_async():
+                if transcribe_enabled:
+                    print(f"   🎵 [并行] 提取文字起こし用音频...")
+                    audio_path_for_transcribe[0] = extract_audio(original_path, speedup=1.0)
+
+            # 启动音频提取线程
+            audio_thread = threading.Thread(target=prepare_audio_async)
+            audio_thread.start()
+
+            # 主线程处理视频（总结用）
             if strategy['audio_only']:
-                # 纯音频模式
-                print(f"\n🎵 第4档: 提取纯音频")
+                print(f"\n🎵 第5档: 提取总结用音频")
                 processed_path = extract_audio(video_path, strategy['speedup'])
                 is_temp = (processed_path != original_path)
             elif strategy['speedup'] != 1.0:
-                # 视频加速
                 print(f"\n⚡ 视频加速: {strategy['speedup']}x")
                 processed_path = speed_up_video(video_path, strategy['speedup'])
                 is_temp = (processed_path != original_path)
+
+            # 等待音频提取完成
+            audio_thread.join()
+            print(f"   ✅ [并行] 音频提取完成")
             
             # 🆕 调用 API 生成（传递 fps 参数）
             print(f"\n📹 分析{'音频' if strategy['audio_only'] else '视频'}: {os.path.basename(original_path)}")
@@ -156,8 +173,28 @@ class VideoProcessor:
             print(f"{'='*70}\n")
             
             # 保存结果
+            # 文字起こし
             transcript = f"[{'音声のみ' if strategy['audio_only'] else '動画直接分析'}モード - 文字起こしなし]"
             timeline = []
+
+            if transcribe_enabled:
+                print(f"\n🎙️ 音声文字起こし開始...")
+                audio_path = audio_path_for_transcribe[0]  # 直接用已经提取好的
+                is_audio_temp = (audio_path is not None and audio_path != original_path)
+                
+                transcript_result = self.model_manager.transcribe_from_audio(audio_path) if audio_path else None
+                
+                if is_audio_temp:
+                    try:
+                        os.unlink(audio_path)
+                    except:
+                        pass
+                    
+                if transcript_result:
+                    transcript = transcript_result
+                    print(f"✅ 文字起こし完了 ({len(transcript_result):,} 文字)")
+                else:
+                    print(f"⚠️ 文字起こし失敗、スキップ")
             
             output_dir = self.config['output_dir']
             # 从 config 获取开关（默认为 True）

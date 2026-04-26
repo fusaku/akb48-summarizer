@@ -1,133 +1,367 @@
-# AKB48 视频自动总结系统
+# AKB48 ビデオ自動要約システム
 
-日语视频高精度转录与智能总结工具，专为 AKB48 Team 8 橋本陽菜配信内容优化。
+橋本陽菜（はるpyon）を中心とした AKB48 Team 8 の配信アーカイブを対象とした、日本語ビデオ高精度転写・AI 要約自動化パイプライン。
 
-## ✨ 功能特性
+Oracle Cloud（ARM 無料枠）上での常時稼働を前提に設計されています。
 
-- 🎤 **高精度转录**：使用 Whisper Large-v3 + 自定义词汇表
-- 🤖 **智能总结**：支持 Gemini 3/2.5 Flash 多模型自动降级
-- 🎬 **视频直传**：直接上传视频到 Gemini 分析（快速模式）
-- ⚡ **视频加速**：支持 2x 加速处理
-- 📁 **批量处理**：自动扫描目录，跳过已处理文件
-- 🔄 **实时监控**：守护进程模式，自动处理新上传视频
+---
 
-## 📦 项目结构
+## 目次
+
+- [システム概要](#システム概要)
+- [アーキテクチャ](#アーキテクチャ)
+- [機能一覧](#機能一覧)
+- [必要環境](#必要環境)
+- [インストール](#インストール)
+- [設定](#設定)
+- [使い方](#使い方)
+- [処理モード詳細](#処理モード詳細)
+- [ビデオ最適化戦略](#ビデオ最適化戦略)
+- [モデル降格ロジック](#モデル降格ロジック)
+- [後処理パイプライン](#後処理パイプライン)
+- [出力フォーマット](#出力フォーマット)
+- [自動クリーンアップ](#自動クリーンアップ)
+- [プロジェクト構造](#プロジェクト構造)
+
+---
+
+## システム概要
+
+```
+Oracle OCI バケット
+       ↓  scripts/download_videos.py
+videos/ ディレクトリ
+       ↓  scripts/main.py  （または watch.py による監視）
+       ├─ [Whisper モード]  転写 → AI 要約
+       └─ [動画直送モード]  Gemini API に動画をアップロードして直接分析
+              ↓
+outputs/ ディレクトリ
+       ├─ *_detailed.txt   詳細版 AI 要約
+       ├─ *_youtube.txt    YouTube コメント用簡潔版
+       ├─ *.json           構造化データ
+       └─ *_invalid.txt    フォーマット検証失敗時の生 AI 出力（デバッグ用）
+              ↓  後処理
+       ├─ Oracle バケット内の処理済みビデオを削除
+       ├─ YouTube 動画の概要欄を自動更新
+       └─ GitHub Pages リポジトリに要約ファイルを push
+```
+
+---
+
+## アーキテクチャ
 
 ```
 akb48-summarizer/
-├── config/              # 配置文件
-│   ├── config.yaml     # 主配置
-│   └── vocabulary.txt  # 自定义词汇表
-├── core/               # 核心业务逻辑
-│   ├── transcriber.py  # Whisper 转录
-│   ├── summarizer.py   # AI 总结
-│   └── processor.py    # 视频处理协调
-├── services/           # 外部服务
-│   └── gemini.py      # Gemini API 客户端
-├── models/            # 模型管理
-│   └── manager.py     # 模型管理器
-├── utils/             # 工具函数
-│   ├── file.py        # 文件操作
-│   ├── video.py       # 视频工具
-│   └── format.py      # 格式化输出
-├── scripts/           # 可执行脚本
-│   ├── main.py        # 主程序
-│   └── watch.py       # 监控守护进程
-└── outputs/           # 输出目录
+├── config/
+│   ├── config.yaml          # 全設定の中心ファイル
+│   └── vocabulary.txt       # Whisper 用カスタム語彙 (~280 語)
+├── core/
+│   ├── processor.py         # 処理全体のオーケストレーター
+│   ├── transcriber.py       # Whisper Large-v3 転写器
+│   └── summarizer.py        # AI 出力の解析・検証
+├── services/
+│   └── gemini.py            # Gemini API クライアント（テキスト・動画）
+├── models/
+│   └── manager.py           # モデル選択・降格ロジック
+├── utils/
+│   ├── file.py              # 設定読み込み・ファイル I/O・処理ログ
+│   ├── video.py             # ffprobe 情報取得・ffmpeg 加速・音声抽出
+│   ├── video_optimizer.py   # 時長ベースの最適化戦略（5 段階）
+│   └── format.py            # タイムライン生成・YouTube コメント生成
+└── scripts/
+    ├── main.py              # バッチ処理エントリーポイント
+    ├── watch.py             # watchdog による自動監視デーモン
+    ├── download_videos.py   # Oracle OCI からのビデオダウンロード
+    ├── update_description.py # YouTube 概要欄の自動更新
+    └── update_git.py        # GitHub Pages への要約ファイル push
 ```
 
-## 🚀 快速开始
+---
 
-### 1. 安装依赖
+## 機能一覧
+
+| カテゴリ | 機能 |
+|---|---|
+| **転写** | Whisper Large-v3 + 280 語のカスタム語彙（メンバー名・公演名・ファン名等） |
+| **AI 要約** | Gemini API による詳細版 + YouTube 用簡潔版の同時生成 |
+| **動画直送** | Gemini Files API にビデオをアップロードして直接分析（Whisper 不要） |
+| **最適化** | 動画時長に応じた 5 段階の前処理戦略（加速・fps 削減・音声抽出） |
+| **モデル降格** | Gemini 3 Flash → 2.5 Flash → 2.5 Flash Lite → Ollama Qwen 14B |
+| **バッチ処理** | 処理済みログによるスキップ、エラー時の継続処理 |
+| **監視デーモン** | watchdog による `videos/` ディレクトリのリアルタイム監視 |
+| **OCI 連携** | Oracle バケットからのダウンロードと処理済みビデオの自動削除 |
+| **YouTube 連携** | OAuth2 で YouTube Data API v3 を呼び出して概要欄を自動更新 |
+| **Git 連携** | 要約ファイルを GitHub Pages リポジトリに自動 commit & push |
+| **クリーンアップ** | 月次アーカイブ・容量超過時の古いビデオ自動削除（bash スクリプト） |
+
+---
+
+## 必要環境
+
+**システム依存**
+- Python 3.10 以上
+- ffmpeg / ffprobe
+- Git（後処理を使う場合）
+
+**Python パッケージ**
+
+```
+faster-whisper>=1.0.0
+google-generativeai>=0.8.0
+pyyaml>=6.0
+watchdog>=3.0.0
+requests>=2.31.0
+oci                          # Oracle OCI SDK（download_videos.py 用）
+google-auth-oauthlib         # YouTube 更新用
+google-api-python-client     # YouTube 更新用
+```
+
+---
+
+## インストール
 
 ```bash
+# 1. リポジトリをクローン
+git clone <repo_url>
+cd akb48-summarizer
+
+# 2. Python 依存をインストール
 pip3 install --break-system-packages -r requirements.txt
+
+# 3. システム依存をインストール（Ubuntu）
+sudo apt-get install ffmpeg
 ```
 
-### 2. 配置
+---
 
-编辑 `config/config.yaml`：
+## 設定
+
+`config/config.yaml` を編集してください。最低限必要な設定は以下のとおりです。
+
 ```yaml
-# 设置 Gemini API 密钥路径
-gemini_api_key_file: "/path/to/your/.gemini_api_key"
+# Gemini API キーファイルのパス（ファイルに生キーを書く）
+gemini_api_key_file: "/home/ubuntu/.gemini_api_key"
 
-# 选择处理模式
+# 処理モードの選択
 processing:
-  use_video_direct_analysis: true  # true=视频直传，false=Whisper转录
-  video_speedup: 2.0               # 视频加速倍数
-  media_resolution: "LOW"          # 视频分辨率
+  use_video_direct_analysis: true  # true = 動画直送、false = Whisper 転写
+  media_resolution: "LOW"          # LOW / MEDIUM / HIGH
+  save_raw_on_fail: true           # フォーマット検証失敗時に生出力を保存
+
+# 入力ビデオフォルダ
+input:
+  video_folder: "./videos"
+  mode: "folder"                   # "folder" または "single"
 ```
 
-### 3. 运行
+Oracle OCI を使う場合は `config/bucket_credentials.key` に以下の 3 行を記述します。
 
-**单次处理模式：**
+```
+<namespace>
+<bucket_name>
+<region>          # 例: ap-tokyo-1
+```
+
+---
+
+## 使い方
+
+### バッチ処理（単発実行）
+
 ```bash
-cd scripts
-python3 main.py
+python3 scripts/main.py
 ```
 
-**监控模式（自动处理新视频）：**
+`videos/` 内のビデオを順番に処理し、`outputs/` に結果を保存します。処理済みビデオは `outputs/processed.json` に記録され、次回実行時にスキップされます。
+
+### 監視デーモン（常時起動）
+
 ```bash
-cd scripts
-python3 watch.py
+python3 scripts/watch.py
 ```
 
-## 📖 文档
+`videos/` ディレクトリを watchdog で監視し、新しいビデオが追加されると自動的に `main.py` を呼び出します。
 
-- [使用指南](USAGE.md) - 详细的使用说明
-- [迁移指南](MIGRATION.md) - 从旧版本迁移
-- [重构总结](REFACTOR_SUMMARY.md) - 项目重构详情
+### Oracle OCI からダウンロード
 
-## 🎯 两种处理模式
+```bash
+python3 scripts/download_videos.py
+```
 
-### 模式 1：视频直传（推荐）
+設定された OCI バケットからビデオを `videos/` にダウンロードします。
 
-- ⚡ 速度快 3-4 倍
-- 🎬 直接上传到 Gemini 分析
-- 📝 输出：详细总结 + YouTube 简洁版
+---
 
-### 模式 2：Whisper 转录
+## 処理モード詳細
 
-- 📄 完整转录文本
-- 🎯 支持自定义词汇表
-- 📊 输出：转录 + 总结 + 时间轴
+### モード 1: 動画直送（`use_video_direct_analysis: true`）
 
-## 🛠️ 技术栈
+1. `VideoOptimizer` が時長に応じた前処理戦略を決定
+2. 必要に応じて ffmpeg で加速・音声抽出
+3. Gemini Files API にアップロード
+4. プロンプトで **詳細版** と **YouTube 版** を同時生成
+5. `Summarizer.parse_dual_summary()` で 2 バージョンに分割
+6. `Summarizer.validate_youtube_format()` でフォーマット検証。失敗時はコードで生成
 
-- **转录**：faster-whisper (Whisper Large-v3)
-- **AI 总结**：Google Gemini API
-- **视频处理**：ffmpeg
-- **配置**：YAML
+**出力**: 詳細版 `.txt` + YouTube 版 `.txt` + `.json`（転写テキストなし）
 
-## 📊 输出格式
+### モード 2: Whisper 転写（`use_video_direct_analysis: false`）
 
-每个视频生成两个文件：
+1. `Transcriber` が Whisper Large-v3 で日本語転写
+2. `config/vocabulary.txt` のカスタム語彙を `initial_prompt` として注入
+3. 転写テキストを `ModelManager.summarize_from_text()` で AI 要約
+4. タイムライン生成・YouTube コメント生成
 
-**1. 文本文件 (`.txt`)**
-- AI 总结（详细版）
-- YouTube 评论（简洁版）
-- 时间轴
-- 完整转录（Whisper 模式）
+**出力**: 詳細版 `.txt` + YouTube 版 `.txt` + `.json`（完全転写テキスト付き）
 
-**2. JSON 文件 (`.json`)**
-- 结构化数据
-- 便于后续处理
+---
 
-## ❓ 常见问题
+## ビデオ最適化戦略
 
-**Q: 视频太长怎么办？**  
-A: 当前版本暂不支持超长视频自动分段，建议手动分割。
+`VideoOptimizer` は ffprobe で取得した動画時長に基づき、Gemini の 250,000 トークン上限に収まるよう自動選択します（安全余裕 5%）。
 
-**Q: 如何提高准确率？**  
-A: 在 `config/vocabulary.txt` 中添加专有名词。
+| 段階 | 時長 | 処理 | fps | 推定レート |
+|---|---|---|---|---|
+| 第 1 档 | ≤ 40 分 | そのまま | 1.0 | 87 tokens/秒 |
+| 第 2 档 | 40〜80 分 | 2倍速 | 1.0 | 87 tokens/秒 |
+| 第 3 档 | 80〜120 分 | 2倍速 | 0.5 | 59.5 tokens/秒 |
+| 第 4 档 | 120〜170 分 | 2倍速 | 0.25 | 45.75 tokens/秒 |
+| 第 5 档 | 170〜240 分 | 2倍速 + 音声抽出 | — | 32 tokens/秒 |
+| — | > 240 分 | ❌ 処理不可 | — | — |
 
-**Q: API 调用失败怎么办？**  
-A: 系统自动降级到备用模型（Gemini 3→2.5→Lite→Ollama）。
+---
 
-## 📝 许可证
+## モデル降格ロジック
+
+`ModelManager` は `config.yaml` の `summarization_models` リストを上から順に試みます。
+
+```
+1. gemini-3-flash-preview    （最高品質）
+2. gemini-2.5-flash          （安定・品質良好）
+3. gemini-2.5-flash-lite     （RPM 多め・最速）
+4. qwen2.5:14b（Ollama）     （ローカル・無制限・要手動有効化）
+```
+
+動画直送モードでは Gemini モデルのみ使用します。Ollama は Whisper モードのテキスト要約時のみ有効です。
+
+---
+
+## 後処理パイプライン
+
+`main.py` はビデオ処理完了後に以下を順番に実行します（各セクションは config で有効化）。
+
+### 1. Oracle バケット自動削除
+
+`oracle_download.auto_cleanup: true` の場合、処理済みビデオ（`outputs/` に対応する `.txt` が存在するもの）を OCI バケットから削除します。`.uploaded` マーカーファイルも同時に削除されます。
+
+### 2. YouTube 概要欄の自動更新
+
+`youtube_description_update.enabled: true` の場合、`videos/` 内の `*.mp4.uploaded` ファイルを走査します。各ファイルに書かれた YouTube 動画 ID を参照し、対応する `*_youtube.txt` の内容を既存の概要欄の先頭に追記します。
+
+認証情報は `config/credentials/autoupsr/` 以下の OAuth2 トークンを使用します。
+
+### 3. GitHub Pages への要約 push
+
+`git_update.enabled: true` の場合、`*_detailed.txt` を `<git_repo_path>/summaries/<video_id>.txt` にコピーし、バッチ commit → 一括 push します。ローカルに未 push のコミットが残っている場合も自動検出して push します。
+
+---
+
+## 出力フォーマット
+
+### `*_detailed.txt`
+
+```
+======================================================================
+動画: <ファイル名>
+生成時間: 2026-01-11 13:30:00
+使用モデル: gemini-3-flash-preview
+======================================================================
+
+【AI要約（詳細版）】
+----------------------------------------------------------------------
+## 概要
+...
+
+## 主なトピック
+...
+
+【タイムライン】
+----------------------------------------------------------------------
+00:05 - ...
+12:30 - ...
+
+【完全な文字起こし】
+----------------------------------------------------------------------
+（Whisper モードのみ）
+```
+
+### `*_youtube.txt`
+
+```
+📝 はるpyonの配信まとめ
+
+...
+
+💡 この配信の見どころ：
+- ...
+
+ぜひご覧ください✨
+
+※ この要約は自動生成されました
+```
+
+### `*.json`
+
+```json
+{
+  "video": "filename.mp4",
+  "summary": "...",
+  "timeline": [{"time": "00:05", "seconds": 5, "text": "..."}],
+  "transcript": "...",
+  "youtube_comment": "...",
+  "model": "gemini-3-flash-preview",
+  "stats": {"char_count": 12345, "generated_at": "..."}
+}
+```
+
+---
+
+## 自動クリーンアップ
+
+`auto_cleanup/` 以下の bash スクリプトを cron 等で定期実行することを推奨します。
+
+### `cleanup_videos.sh`
+
+`videos/` の合計サイズが `MAX_SIZE_GB`（デフォルト 10GB）を超えた場合、最も古い `.mp4` ファイルから削除して `TARGET_PERCENT`（80%）まで縮小します。
+
+```bash
+# crontab 例: 1時間ごとにチェック
+0 * * * * /home/ubuntu/akb48-summarizer/auto_cleanup/cleanup_videos.sh >> /var/log/cleanup.log 2>&1
+```
+
+### `archive_outputs.sh`
+
+前月分の `outputs/` ファイルを `archives/outputs_YYYY_MM.tar.gz` に圧縮・移動します。
+
+```bash
+# crontab 例: 毎月1日の深夜に実行
+0 2 1 * * /home/ubuntu/akb48-summarizer/auto_cleanup/archive_outputs.sh >> /var/log/archive.log 2>&1
+```
+
+---
+
+## カスタム語彙の追加
+
+`config/vocabulary.txt` に 1 行 1 語で追記します。コメントは `#` で始めます。語彙は Whisper の `initial_prompt` として注入されるため、メンバー名・公演名・ファン名・口癖など専門語を追加することで転写精度が向上します。
+
+```
+# 新メンバーの追加例
+山田花子
+やまちゃん
+```
+
+---
+
+## ライセンス
 
 MIT License
-
-## 🙏 致谢
-
-专为 AKB48 粉丝社区开发。

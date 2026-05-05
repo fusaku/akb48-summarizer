@@ -128,6 +128,12 @@ summarization_models:
     api_url: "http://localhost:11434/api/generate"
     notes: "本地备份，无限使用，质量很好"
 
+# ==================== Groq 転写設定 ====================
+groq:
+  model: "whisper-large-v3"
+  chunk_duration_seconds: 1800
+  api_keys_file: "config/groq_credentials.key"
+
 # ==================== 时间轴配置 ====================
 timeline:
   num_points: 10  # 生成多少个时间点

@@ -26,7 +26,8 @@ cd "$OUTPUTS_DIR" || exit 1
 # 查找上个月的文件
 # 文件名格式: YYMMDD 开头 (例如 260115)
 # 提取年月部分,匹配上个月
-file_pattern="${last_year:2:2}${last_month_num}*"
+short_year=$(echo "$last_year" | cut -c 3-4)
+file_pattern="${short_year}${last_month_num}*"
 
 # 统计匹配的文件
 file_count=$(ls -1 $file_pattern 2>/dev/null | wc -l)

@@ -142,7 +142,8 @@ def save_results(
     youtube_comment: str,
     model_name: str,
     output_dir: str = "./outputs",
-    raw_content: str = None  # 🆕 新增：接收 AI 原始不合规回复
+    raw_content: str = None,  # 🆕 新增：接收 AI 原始不合规回复
+    transcript_model: str = None
 ) -> tuple[str, str, str]:
     """
     保存结果（包括视频名）
@@ -176,7 +177,9 @@ def save_results(
         f.write("="*70 + "\n")
         f.write(f"動画: {os.path.basename(video_path)}\n")
         f.write(f"生成時間: {datetime.now()}\n")
-        f.write(f"使用モデル: {model_name}\n")
+        f.write(f"要約モデル: {model_name}\n")
+        if transcript_model:
+            f.write(f"転写モデル: {transcript_model}\n")
         f.write("="*70 + "\n\n")
 
         f.write("【AI要約（詳細版）】\n")

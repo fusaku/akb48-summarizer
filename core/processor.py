@@ -200,10 +200,14 @@ class VideoProcessor:
             # 从 config 获取开关（默认为 True）
 
             save_raw_enabled = self.config.get('processing', {}).get('save_raw_on_fail', True)
+            groq_model = self.config.get('groq', {}).get('model', '')
+            transcript_model = f"Groq {groq_model}" if groq_model and transcript_result else "Gemini"
+
             detailed_txt, youtube_txt, json_file = save_results(
                 original_path, transcript, detailed_version, timeline,
                 youtube_version, model_name, output_dir,
-                raw_content=invalid_raw_content if save_raw_enabled else None # 🆕 传入原始文本
+                raw_content=invalid_raw_content if save_raw_enabled else None,
+                transcript_model=transcript_model
             )
             
             print(f"💾 结果已保存:")

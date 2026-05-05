@@ -280,6 +280,18 @@ class ModelManager:
 
     def transcribe_from_audio(self, audio_path: str) -> Optional[str]:
         """从音频文件生成文字起こし"""
+
+        # Groqが設定されていれば優先
+        groq_config = self.config.get('groq', {})
+        groq_key_file = groq_config.get('api_keys_file', '')
+        if groq_key_file:
+            from services import GroqTranscriber
+            groq = GroqTranscriber(self.config)
+            result = groq.transcribe(audio_path, self.config)
+            if result:
+                return result
+            print("   ⚠️  Groq失敗、Geminiにフォールバック")
+
         if not self.gemini_client:
             return None
 

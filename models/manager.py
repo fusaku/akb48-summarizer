@@ -17,12 +17,6 @@ class ModelManager:
     """AI 模型管理器"""
     
     def __init__(self, config: Dict[str, Any]):
-        """
-        初始化模型管理器
-        
-        Args:
-            config: 配置字典
-        """
         self.config = config
         
         # 加载 Gemini API 密钥
@@ -46,28 +40,21 @@ class ModelManager:
         for i, m in enumerate(self.models, 1):
             print(f"   {i}. {m['name']} ({m['type']})")
     
+    # ------------------------------------------------------------------
+    # 文本摘要
+    # ------------------------------------------------------------------
+
     def summarize_from_text(
         self,
         text: str,
         duration: float
     ) -> Tuple[Optional[str], Optional[str]]:
-        """
-        从文本生成总结
-        
-        Args:
-            text: 转录文本
-            duration: 视频时长（秒）
-            
-        Returns:
-            (总结文本, 模型名称)，失败返回 (None, None)
-        """
         print(f"\n🤖 开始AI总结...")
         print(f"   文本长度: {len(text):,} 字符")
         print(f"   视频时长: {duration/60:.1f} 分钟\n")
         
         prompt = self._create_text_prompt(text, duration)
         
-        # 按优先级尝试每个模型
         for i, model_config in enumerate(self.models, 1):
             model_name = model_config['name']
             model_type = model_config['type']
@@ -98,20 +85,15 @@ class ModelManager:
         print(f"❌ 所有模型都失败了")
         return None, None
     
+    # ------------------------------------------------------------------
+    # 视频直送分析
+    # ------------------------------------------------------------------
+
     def summarize_from_video(
         self,
         video_path: str,
-        fps: float = None  # 🆕 添加 fps 参数
+        fps: float = None
     ) -> Tuple[Optional[str], Optional[str], Optional[float]]:
-        """
-        从视频直接生成总结
-        
-        Args:
-            video_path: 视频文件路径
-            
-        Returns:
-            (总结文本, 模型名称, 视频时长)，失败返回 (None, None, None)
-        """
         print(f"\n🎬 直接视频分析模式")
         print(f"{'='*70}")
         
@@ -123,7 +105,6 @@ class ModelManager:
         print(f"📹 视频文件: {os.path.basename(video_path)}")
         print(f"📊 文件大小: {file_size:.1f} MB")
         
-        # 只尝试 Gemini 模型
         gemini_models = [m for m in self.models if m['type'] == 'gemini']
         
         if not gemini_models:
@@ -135,7 +116,6 @@ class ModelManager:
         prompt = self._create_video_prompt()
         media_res = self.config.get('processing', {}).get('media_resolution', 'MEDIUM')
         
-        # 按优先级尝试
         for i, model_config in enumerate(gemini_models, 1):
             model_name = model_config['name']
             
@@ -151,7 +131,7 @@ class ModelManager:
                     model_config['model_id'],
                     model_config['config'],
                     media_res,
-                    fps  # 🆕 传递 fps 参数
+                    fps
                 )
                 
                 if summary:
@@ -167,19 +147,196 @@ class ModelManager:
         print(f"❌ 所有 Gemini 模型都失败了")
         return None, None, None
     
+    # ------------------------------------------------------------------
+    # 音声転写 + Gemini 後処理（メイン変更箇所）
+    # ------------------------------------------------------------------
+
+    def transcribe_from_audio(self, audio_path: str) -> Optional[str]:
+        """
+        音声ファイルから転写テキストを生成する。
+
+        処理フロー:
+          1. Groq Whisper で転写（silence-aware チャンク分割）
+          2. Gemini で句読点追加・可読性向上（タイムスタンプは保持）
+          3. 結果を返す
+
+        Returns:
+            転写テキスト or None
+        """
+        print(f"\n{'='*70}")
+        print(f"🎙️  音声転写パイプライン開始")
+        print(f"{'='*70}")
+
+        # Step 1: Groq 転写
+        raw_transcript = self._transcribe_with_groq(audio_path)
+
+        if not raw_transcript:
+            print(f"\n❌ Groq転写に失敗しました")
+            return None
+
+        print(f"\n   📄 Groq転写テキスト:")
+        print(f"   文字数: {len(raw_transcript):,} 文字")
+        preview = raw_transcript[:300].replace('\n', ' ')
+        print(f"   先頭300字: {preview}...")
+
+        # Step 2: Gemini 後処理
+        polished = self._polish_with_gemini(raw_transcript, audio_path)
+
+        if polished:
+            improvement = len(polished) - len(raw_transcript)
+            print(f"\n   ✅ Gemini後処理完了")
+            print(f"   文字数変化: {len(raw_transcript):,} → {len(polished):,}"
+                  f" ({improvement:+d} 文字)")
+            return polished
+        else:
+            print(f"\n   ⚠️  Gemini後処理失敗 → Groq生テキストをそのまま使用")
+            return raw_transcript
+
+    def _transcribe_with_groq(self, audio_path: str) -> Optional[str]:
+        """Groq Whisper で転写を実行する内部メソッド"""
+        groq_config = self.config.get('groq', {})
+        groq_key_file = groq_config.get('api_keys_file', '')
+
+        if not groq_key_file:
+            print(f"   ⚠️  Groq設定なし → スキップ")
+            return None
+
+        try:
+            from services import GroqTranscriber
+            groq = GroqTranscriber(self.config)
+            return groq.transcribe(audio_path, self.config)
+        except Exception as e:
+            print(f"   ❌ Groq転写で例外発生: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _polish_with_gemini(self, raw_text: str, audio_path: str) -> Optional[str]:
+        """
+        Gemini で転写テキストの句読点追加・可読性向上を行う。
+
+        ルール:
+          - [hh:mm:ss] 形式のタイムスタンプは絶対に移動・削除しない
+          - 内容（事実・固有名詞）は変更しない
+          - 句読点の追加・誤字修正・読みやすい区切りへの調整のみ行う
+        """
+        if not self.gemini_client:
+            print(f"   ⚠️  Geminiクライアント未初期化 → スキップ")
+            return None
+
+        gemini_models = [m for m in self.models if m['type'] == 'gemini']
+        if not gemini_models:
+            print(f"   ⚠️  利用可能なGeminiモデルなし → スキップ")
+            return None
+
+        print(f"\n{'='*70}")
+        print(f"   ✨ Gemini後処理: 句読点追加・可読性向上")
+        print(f"{'='*70}")
+        print(f"   入力文字数: {len(raw_text):,} 文字")
+        print(f"   ※ タイムスタンプ [hh:mm:ss] は保持します")
+
+        prompt = self._create_polish_prompt(raw_text)
+
+        for i, model_config in enumerate(gemini_models, 1):
+            model_name = model_config['name']
+            print(f"\n   [{i}/{len(gemini_models)}] {model_name} で試行中...")
+
+            try:
+                result, _ = self.gemini_client.generate_from_video(
+                    audio_path,
+                    prompt,
+                    model_config['model_id'],
+                    model_config['config'],
+                    fps=None
+                )
+
+                if result:
+                    # タイムスタンプが失われていないか検証
+                    original_ts_count = raw_text.count('[')
+                    result_ts_count = result.count('[')
+
+                    print(f"   タイムスタンプ数: 元 {original_ts_count} → 後処理後 {result_ts_count}")
+
+                    if result_ts_count < original_ts_count * 0.8:
+                        # 20%以上消えていたら後処理結果を棄却
+                        print(f"   ⚠️  タイムスタンプが大幅に失われました → このモデルの結果を棄却")
+                        continue
+
+                    print(f"   ✅ {model_name} 後処理成功")
+                    return result
+
+            except Exception as e:
+                print(f"   ❌ {model_name} 例外: {e}")
+                continue
+
+        print(f"   ❌ 全Geminiモデルで後処理失敗")
+        return None
+
+    def _create_polish_prompt(self, raw_text: str) -> str:
+        """Gemini後処理用プロンプトを生成する"""
+        return f"""# Role
+                あなたは日本語テキストの校正専門家です。
+                添付の音声と、Whisper音声認識システムが生成した転写テキストを照合し、
+                誤認識を修正しながら読みやすく整えることが仕事です。
+
+                # 最重要ルール（絶対に守ること）
+
+                ## タイムスタンプについて
+                - `[00:00:00]` `[00:05:00]` のような `[hh:mm:ss]` 形式のタイムスタンプは **絶対に削除・移動・変更しないこと**
+                - タイムスタンプの前後の改行も保持すること
+                - タイムスタンプは動画の時刻を示す重要なマーカーです
+
+                ## 内容について
+                - テキストに書かれている **事実・固有名詞・発言内容は一切変更しないこと**
+                - 話者が言っていない言葉を追加しないこと
+                - 要約・省略・言い換えは禁止
+
+                # 許可されている操作（これだけ行うこと）
+
+                1. **句読点の追加**: 読点「、」句点「。」を適切な位置に追加する
+                2. **誤字修正**: 音声と照合し、明らかな音声認識ミス（同音異義語など）を修正する
+                   - 例: 「よろしくおねがいします」→「よろしくお願いします」
+                   - 例: 「きょうはいい天気ですね」→「今日はいい天気ですね」
+                3. **改行整理**: 不自然な改行を整え、段落を読みやすくする
+                   - ただしタイムスタンプ前後の改行は変えないこと
+                4. **歌唱部分の処理**: 音声を聞いて歌っている区間を判断し、以下のルールで処理する
+                   - 歌詞はすべて省略し、代わりに `[🎵 曲名]` の形式で表記する
+                   - 曲名が不明な場合は `[🎵 歌唱]` と表記する
+                   - 歌唱中に話し声（トーク）が入った場合は、その発言を歌唱表記の後に続けて記載する
+                   - 例:
+                    [🎵 フライングゲット]
+                    （ここで急に）あ、間違えた！（笑）
+                    [🎵 歌唱]
+
+                # 出力形式
+                - 整形後のテキストのみを出力すること
+                - 「以下が整形後のテキストです」などの前置きは不要
+                - コードブロック（```）で囲まない
+
+                # 添付音声と照合しながら、以下の転写テキストを校正してください。
+
+                # 処理対象テキスト
+
+                {raw_text}"""
+
+    # ------------------------------------------------------------------
+    # Gemini テキスト呼び出し
+    # ------------------------------------------------------------------
+
     def _call_gemini_text(self, prompt: str, model_config: Dict[str, Any]) -> Optional[str]:
-        """调用 Gemini API（文本模式）"""
         if not self.gemini_client:
             raise Exception("Gemini API客户端未初始化")
-        
         return self.gemini_client.generate_from_text(
             prompt,
             model_config['model_id'],
             model_config['config']
         )
-    
+
+    # ------------------------------------------------------------------
+    # Ollama
+    # ------------------------------------------------------------------
+
     def _call_ollama(self, prompt: str, model_config: Dict[str, Any]) -> Optional[str]:
-        """调用 Ollama 本地模型"""
         api_url = model_config.get('api_url', 'http://localhost:11434/api/generate')
         model_id = model_config['model_id']
         config = model_config['config']
@@ -210,7 +367,6 @@ class ModelManager:
             last_activity = time.time()
             
             for line in response.iter_lines():
-                # 检查超时
                 if time.time() - last_activity > 120:
                     print(f"\n⚠️ 流式响应超时（2分钟无数据）")
                     return None
@@ -237,9 +393,12 @@ class ModelManager:
         except Exception as e:
             print(f"❌ Ollama 错误: {e}")
             return None
-    
+
+    # ------------------------------------------------------------------
+    # プロンプト生成
+    # ------------------------------------------------------------------
+
     def _create_text_prompt(self, text: str, duration: float) -> str:
-        """生成文本总结提示词"""
         minutes = int(duration // 60)
         seconds = int(duration % 60)
         
@@ -278,73 +437,7 @@ class ModelManager:
                 ---
                 要約："""
 
-    def transcribe_from_audio(self, audio_path: str) -> Optional[str]:
-        """从音频文件生成文字起こし"""
-
-        # Groqが設定されていれば優先
-        groq_config = self.config.get('groq', {})
-        groq_key_file = groq_config.get('api_keys_file', '')
-        if groq_key_file:
-            from services import GroqTranscriber
-            groq = GroqTranscriber(self.config)
-            result = groq.transcribe(audio_path, self.config)
-            if result:
-                return result
-            print("   ⚠️  Groq失敗、Geminiにフォールバック")
-
-        if not self.gemini_client:
-            return None
-
-        prompt = """# Role
-        あなたは極めて忠実な高精度文字起こしロボットです。
-        特にAKB48の橋本陽菜（はるpyon）の配信スタイルに精通しています。
-
-        # Task
-        提供された音声の内容（橋本陽菜のShowroom配信）を、一言一句漏らさず、100%忠実に文字起こししてください。
-
-        # Constraints
-        1. **一比一の再現（連想・ループ禁止）**: 
-           - 文脈から内容を推測したり、言葉を補完したり、言い換えたりすることは**厳禁**です。
-           - 同じ言葉が不自然に繰り返される場合は、ループに陥らずに次の音声へ進んでください。
-           - 実際に聞こえた言葉だけを、聞こえたままに書き起こしてください。
-        2. **歌唱・BGMの扱い（重要）**: 
-            - 歌っている最中の**「歌詞」自体は書き起こす必要はありません**。
-            - 重要：歌っている途中で**「喋り（トーク）」が入った場合は、その瞬間の言葉を逃さず一言一句書き起こしてください。**
-            - 形式例：[歌唱：曲名] （ここで急に話し始めた内容...）
-            - 音楽が流れていても、彼女の声（喋り）が聞こえる限りは、それを最優先で記録してください。
-        3. **タイムスタンプの基準**:
-           - 動画の開始 からの経過時間を「物理的な時間轴」として正確に記述してください。
-           - AIの推測や配信内の時計ではなく、音声データの絶対的な位置に基づいてください。
-           - **動画の開始時点を必ず [00:00:00] とし、そこからの経過時間を記述してください。**
-           - 実際の配信時刻（時計の時刻）ではなく、動画の再生時間を基準にしてください。
-        4. **タイムスタンプの挿入形式**: 
-           - **必ず [hh:mm:ss] の形式で挿入してください。**
-           - およそ 5 分ごとに、または話題が変わるタイミングで挿入してください。
-        5. **フィラーの扱い**: 「えー」「あのー」などのフィラーは、トークン数を節約するために適宜省略して構いません。
-        6. **出力形式**: 余計な解説、要約、メタコメントは一切禁止です。書き起こしテキストのみを出力してください。"""
-
-        gemini_models = [m for m in self.models if m['type'] == 'gemini']
-
-        for model_config in gemini_models:
-            try:
-                print(f"   文字起こし: {model_config['name']} で試行中...")
-                text, _ = self.gemini_client.generate_from_video(
-                    audio_path,
-                    prompt,
-                    model_config['model_id'],
-                    model_config['config'],
-                    fps=None
-                )
-                if text:
-                    return text
-            except Exception as e:
-                print(f"   ⚠️ {model_config['name']} 失敗: {e}")
-                continue
-            
-        return None
-
     def _create_video_prompt(self) -> str:
-        """生成视频分析提示词"""
         return """# Role
                 あなたはAKB48、特に橋本陽菜（はるpyon）に精通した専門家ですが、今回はその知識を一切封印し、**「動画内で発生した事実のみを正確に書き起こす、極めて客観的な記録員」**として振る舞ってください。
                 

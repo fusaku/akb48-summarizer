@@ -6,10 +6,11 @@
 import yaml
 import json
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any
-
+logger = logging.getLogger(__name__)
 
 def load_config(config_path: str = None) -> Dict[str, Any]:
     """
@@ -226,7 +227,7 @@ def save_results(
             f.write(f"Generated at: {datetime.now()}\n")
             f.write(f"{'='*40}\n\n")
             f.write(raw_content)
-        print(f"   ⚠️  原始不合规内容已保存: {os.path.basename(invalid_file)}")
+        logger.warning(f"   ⚠️  原始不合规内容已保存: {os.path.basename(invalid_file)}")
 
     # 这里的 return 要确保返回三个值（原代码返回了 detailed_txt, youtube_txt, json_file）
     return detailed_txt, youtube_txt, json_file

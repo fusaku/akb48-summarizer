@@ -7,11 +7,11 @@ import os
 import time
 import requests
 import json
+import logging
 from typing import Optional, Tuple, Dict, Any
 from pathlib import Path
-
 from services import GeminiClient
-
+logger = logging.getLogger(__name__)
 
 class ModelManager:
     """AI 模型管理器"""
@@ -27,7 +27,7 @@ class ModelManager:
                 api_key = f.read().strip()
             self.gemini_client = GeminiClient(api_key)
         except Exception as e:
-            print(f"⚠️  无法加载Gemini API密钥: {e}")
+            logger.error(f"⚠️  无法加载Gemini API密钥: {e}")
         
         # 获取启用的模型列表
         self.models = [
@@ -35,10 +35,10 @@ class ModelManager:
             if m.get('enabled', True)
         ]
         
-        print(f"✅ 模型管理器初始化完成")
-        print(f"   已启用 {len(self.models)} 个模型")
+        logger.info(f"✅ 模型管理器初始化完成")
+        logger.info(f"   已启用 {len(self.models)} 个模型")
         for i, m in enumerate(self.models, 1):
-            print(f"   {i}. {m['name']} ({m['type']})")
+            logger.info(f"   {i}. {m['name']} ({m['type']})")
     
     # ------------------------------------------------------------------
     # 文本摘要
@@ -49,9 +49,9 @@ class ModelManager:
         text: str,
         duration: float
     ) -> Tuple[Optional[str], Optional[str]]:
-        print(f"\n🤖 开始AI总结...")
-        print(f"   文本长度: {len(text):,} 字符")
-        print(f"   视频时长: {duration/60:.1f} 分钟\n")
+        logger.info(f"\n🤖 开始AI总结...")
+        logger.info(f"   文本长度: {len(text):,} 字符")
+        logger.info(f"   视频时长: {duration/60:.1f} 分钟\n")
         
         prompt = self._create_text_prompt(text, duration)
         
@@ -59,11 +59,11 @@ class ModelManager:
             model_name = model_config['name']
             model_type = model_config['type']
             
-            print(f"{'='*70}")
-            print(f"尝试模型 {i}/{len(self.models)}: {model_name}")
-            print(f"类型: {model_type}")
-            print(f"说明: {model_config.get('notes', 'N/A')}")
-            print(f"{'='*70}\n")
+            logger.info(f"{'='*70}")
+            logger.info(f"尝试模型 {i}/{len(self.models)}: {model_name}")
+            logger.info(f"类型: {model_type}")
+            logger.info(f"说明: {model_config.get('notes', 'N/A')}")
+            logger.info(f"{'='*70}\n")
             
             try:
                 if model_type == 'gemini':
@@ -71,18 +71,18 @@ class ModelManager:
                 elif model_type == 'ollama':
                     summary = self._call_ollama(prompt, model_config)
                 else:
-                    print(f"❌ 未知模型类型: {model_type}")
+                    logger.error(f"❌ 未知模型类型: {model_type}")
                     continue
                 
                 if summary:
-                    print(f"\n✅ 成功！使用模型: {model_name}\n")
+                    logger.info(f"\n✅ 成功！使用模型: {model_name}\n")
                     return summary, model_name
                     
             except Exception as e:
-                print(f"❌ {model_name} 失败: {e}\n")
+                logger.error(f"❌ {model_name} 失败: {e}\n")
                 continue
         
-        print(f"❌ 所有模型都失败了")
+        logger.error(f"❌ 所有模型都失败了")
         return None, None
     
     # ------------------------------------------------------------------
@@ -94,24 +94,24 @@ class ModelManager:
         video_path: str,
         fps: float = None
     ) -> Tuple[Optional[str], Optional[str], Optional[float]]:
-        print(f"\n🎬 直接视频分析模式")
-        print(f"{'='*70}")
+        logger.info(f"\n🎬 直接视频分析模式")
+        logger.info(f"{'='*70}")
         
         if not os.path.exists(video_path):
-            print(f"❌ 视频文件不存在: {video_path}")
+            logger.error(f"❌ 视频文件不存在: {video_path}")
             return None, None, None
         
         file_size = os.path.getsize(video_path) / (1024 * 1024)
-        print(f"📹 视频文件: {os.path.basename(video_path)}")
-        print(f"📊 文件大小: {file_size:.1f} MB")
+        logger.info(f"📹 视频文件: {os.path.basename(video_path)}")
+        logger.info(f"📊 文件大小: {file_size:.1f} MB")
         
         gemini_models = [m for m in self.models if m['type'] == 'gemini']
         
         if not gemini_models:
-            print(f"❌ 没有可用的 Gemini 模型")
+            logger.error(f"❌ 没有可用的 Gemini 模型")
             return None, None, None
         
-        print(f"🔍 将尝试 {len(gemini_models)} 个 Gemini 模型\n")
+        logger.info(f"🔍 将尝试 {len(gemini_models)} 个 Gemini 模型\n")
         
         prompt = self._create_video_prompt()
         media_res = self.config.get('processing', {}).get('media_resolution', 'MEDIUM')
@@ -119,10 +119,10 @@ class ModelManager:
         for i, model_config in enumerate(gemini_models, 1):
             model_name = model_config['name']
             
-            print(f"{'='*70}")
-            print(f"尝试模型 {i}/{len(gemini_models)}: {model_name}")
-            print(f"说明: {model_config.get('notes', 'N/A')}")
-            print(f"{'='*70}\n")
+            logger.info(f"{'='*70}")
+            logger.info(f"尝试模型 {i}/{len(gemini_models)}: {model_name}")
+            logger.info(f"说明: {model_config.get('notes', 'N/A')}")
+            logger.info(f"{'='*70}\n")
             
             try:
                 summary, duration = self.gemini_client.generate_from_video(
@@ -135,16 +135,16 @@ class ModelManager:
                 )
                 
                 if summary:
-                    print(f"\n✅ 成功！使用模型: {model_name}\n")
+                    logger.info(f"\n✅ 成功！使用模型: {model_name}\n")
                     return summary, model_name, duration
                     
             except Exception as e:
-                print(f"❌ {model_name} 失败: {e}\n")
+                logger.info(f"❌ {model_name} 失败: {e}\n")
                 import traceback
                 traceback.print_exc()
                 continue
         
-        print(f"❌ 所有 Gemini 模型都失败了")
+        logger.info(f"❌ 所有 Gemini 模型都失败了")
         return None, None, None
     
     # ------------------------------------------------------------------
@@ -163,33 +163,33 @@ class ModelManager:
         Returns:
             転写テキスト or None
         """
-        print(f"\n{'='*70}")
-        print(f"🎙️  音声転写パイプライン開始")
-        print(f"{'='*70}")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"🎙️  音声転写パイプライン開始")
+        logger.info(f"{'='*70}")
 
         # Step 1: Groq 転写
         raw_transcript = self._transcribe_with_groq(audio_path)
 
         if not raw_transcript:
-            print(f"\n❌ Groq転写に失敗しました")
+            logger.error(f"\n❌ Groq転写に失敗しました")
             return None
 
-        print(f"\n   📄 Groq転写テキスト:")
-        print(f"   文字数: {len(raw_transcript):,} 文字")
+        logger.info(f"\n   📄 Groq転写テキスト:")
+        logger.info(f"   文字数: {len(raw_transcript):,} 文字")
         preview = raw_transcript[:300].replace('\n', ' ')
-        print(f"   先頭300字: {preview}...")
+        logger.info(f"   先頭300字: {preview}...")
 
         # Step 2: Gemini 後処理
         polished = self._polish_with_gemini(raw_transcript, audio_path)
 
         if polished:
             improvement = len(polished) - len(raw_transcript)
-            print(f"\n   ✅ Gemini後処理完了")
-            print(f"   文字数変化: {len(raw_transcript):,} → {len(polished):,}"
+            logger.info(f"\n   ✅ Gemini後処理完了")
+            logger.info(f"   文字数変化: {len(raw_transcript):,} → {len(polished):,}"
                   f" ({improvement:+d} 文字)")
             return polished
         else:
-            print(f"\n   ⚠️  Gemini後処理失敗 → Groq生テキストをそのまま使用")
+            logger.warning(f"\n   ⚠️  Gemini後処理失敗 → Groq生テキストをそのまま使用")
             return raw_transcript
 
     def _transcribe_with_groq(self, audio_path: str) -> Optional[str]:
@@ -198,7 +198,7 @@ class ModelManager:
         groq_key_file = groq_config.get('api_keys_file', '')
 
         if not groq_key_file:
-            print(f"   ⚠️  Groq設定なし → スキップ")
+            logger.warning(f"   ⚠️  Groq設定なし → スキップ")
             return None
 
         try:
@@ -206,7 +206,7 @@ class ModelManager:
             groq = GroqTranscriber(self.config)
             return groq.transcribe(audio_path, self.config)
         except Exception as e:
-            print(f"   ❌ Groq転写で例外発生: {e}")
+            logger.error(f"   ❌ Groq転写で例外発生: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -221,25 +221,25 @@ class ModelManager:
           - 句読点の追加・誤字修正・読みやすい区切りへの調整のみ行う
         """
         if not self.gemini_client:
-            print(f"   ⚠️  Geminiクライアント未初期化 → スキップ")
+            logger.warning(f"   ⚠️  Geminiクライアント未初期化 → スキップ")
             return None
 
         gemini_models = [m for m in self.models if m['type'] == 'gemini']
         if not gemini_models:
-            print(f"   ⚠️  利用可能なGeminiモデルなし → スキップ")
+            logger.warning(f"   ⚠️  利用可能なGeminiモデルなし → スキップ")
             return None
 
-        print(f"\n{'='*70}")
-        print(f"   ✨ Gemini後処理: 句読点追加・可読性向上")
-        print(f"{'='*70}")
-        print(f"   入力文字数: {len(raw_text):,} 文字")
-        print(f"   ※ タイムスタンプ [hh:mm:ss] は保持します")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"   ✨ Gemini後処理: 句読点追加・可読性向上")
+        logger.info(f"{'='*70}")
+        logger.info(f"   入力文字数: {len(raw_text):,} 文字")
+        logger.info(f"   ※ タイムスタンプ [hh:mm:ss] は保持します")
 
         prompt = self._create_polish_prompt(raw_text)
 
         for i, model_config in enumerate(gemini_models, 1):
             model_name = model_config['name']
-            print(f"\n   [{i}/{len(gemini_models)}] {model_name} で試行中...")
+            logger.info(f"\n   [{i}/{len(gemini_models)}] {model_name} で試行中...")
 
             try:
                 result, _ = self.gemini_client.generate_from_video(
@@ -255,21 +255,21 @@ class ModelManager:
                     original_ts_count = raw_text.count('[')
                     result_ts_count = result.count('[')
 
-                    print(f"   タイムスタンプ数: 元 {original_ts_count} → 後処理後 {result_ts_count}")
+                    logger.info(f"   タイムスタンプ数: 元 {original_ts_count} → 後処理後 {result_ts_count}")
 
                     if result_ts_count < original_ts_count * 0.8:
                         # 20%以上消えていたら後処理結果を棄却
-                        print(f"   ⚠️  タイムスタンプが大幅に失われました → このモデルの結果を棄却")
+                        logger.warning(f"   ⚠️  タイムスタンプが大幅に失われました → このモデルの結果を棄却")
                         continue
 
-                    print(f"   ✅ {model_name} 後処理成功")
+                    logger.info(f"   ✅ {model_name} 後処理成功")
                     return result
 
             except Exception as e:
-                print(f"   ❌ {model_name} 例外: {e}")
+                logger.error(f"   ❌ {model_name} 例外: {e}")
                 continue
 
-        print(f"   ❌ 全Geminiモデルで後処理失敗")
+        logger.error(f"   ❌ 全Geminiモデルで後処理失敗")
         return None
 
     def _create_polish_prompt(self, raw_text: str) -> str:
@@ -287,6 +287,7 @@ class ModelManager:
                 - タイムスタンプは動画の時刻を示す重要なマーカーです
 
                 ## 内容について
+                - **音声に存在しない内容**（Whisperの幻覚）は削除すること。音声を聞いて実際に発話されていない文は除去する
                 - テキストに書かれている **事実・固有名詞・発言内容は一切変更しないこと**
                 - 話者が言っていない言葉を追加しないこと
                 - 要約・省略・言い換えは禁止
@@ -307,6 +308,10 @@ class ModelManager:
                     [🎵 フライングゲット]
                     （ここで急に）あ、間違えた！（笑）
                     [🎵 歌唱]
+                5. **幻覚テキストの除去**: 音声と照合し、実際に発話されていない内容は削除すること
+                   - 同じ文章が連続して繰り返されている場合（例：「私はあなたを愛しています」が複数回）は削除する
+                   - 音声に存在しない唐突な宣言文・無関係なURL・アプリ名は削除する
+                   - 削除した箇所には何も補完しないこと
 
                 # 出力形式
                 - 整形後のテキストのみを出力すること
@@ -341,8 +346,8 @@ class ModelManager:
         model_id = model_config['model_id']
         config = model_config['config']
         
-        print(f"⏳ 调用本地 {model_id}...")
-        print(f"   (这可能需要10-15分钟，请耐心等待)\n")
+        logger.info(f"⏳ 调用本地 {model_id}...")
+        logger.info(f"   (这可能需要10-15分钟，请耐心等待)\n")
         
         payload = {
             "model": model_id,
@@ -358,7 +363,7 @@ class ModelManager:
             }
         }
         
-        print(f"{'='*70}")
+        logger.info(f"{'='*70}")
         
         try:
             response = requests.post(api_url, json=payload, stream=True, timeout=30)
@@ -368,7 +373,7 @@ class ModelManager:
             
             for line in response.iter_lines():
                 if time.time() - last_activity > 120:
-                    print(f"\n⚠️ 流式响应超时（2分钟无数据）")
+                    logger.warning(f"\n⚠️ 流式响应超时（2分钟无数据）")
                     return None
                 
                 if line:
@@ -377,21 +382,21 @@ class ModelManager:
                         data = json.loads(line)
                         token = data.get('response', '')
                         summary += token
-                        print(token, end='', flush=True)
+                        logger.info(token, end='', flush=True)
                         
                         if data.get('done', False):
                             break
                     except:
                         continue
             
-            print(f"\n{'='*70}\n")
+            logger.info(f"\n{'='*70}\n")
             return summary.strip() if summary else None
             
         except requests.exceptions.Timeout:
-            print(f"⚠️ Ollama 连接超时")
+            logger.error(f"⚠️ Ollama 连接超时")
             return None
         except Exception as e:
-            print(f"❌ Ollama 错误: {e}")
+            logger.error(f"❌ Ollama 错误: {e}")
             return None
 
     # ------------------------------------------------------------------

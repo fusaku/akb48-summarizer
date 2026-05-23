@@ -9,8 +9,10 @@ import sys
 import subprocess
 import time
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
+logger = logging.getLogger(__name__)
 
 # 添加父目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -44,7 +46,7 @@ def run_git_command(command: list, cwd: Path) -> tuple[bool, str]:
         lock_file = cwd / ".git" / "index.lock"
         if lock_file.exists():
             # 如果存在锁，简单等待一下
-            print("   ⏳ 等待 Git 锁释放...")
+            logger.info("   ⏳ 等待 Git 锁释放...")
             time.sleep(2)
             
         result = subprocess.run(
@@ -61,33 +63,33 @@ def run_git_command(command: list, cwd: Path) -> tuple[bool, str]:
 
 def validate_git_repo() -> bool:
     if not GIT_REPO_PATH.exists():
-        print(f"   ❌ Git 仓库不存在: {GIT_REPO_PATH}")
+        logger.error(f"   ❌ Git 仓库不存在: {GIT_REPO_PATH}")
         return False
     success, _ = run_git_command(['git', 'status'], GIT_REPO_PATH)
     return success
 
 
 def git_pull() -> bool:
-    print(f"   📥 执行 git pull...")
+    logger.info(f"   📥 执行 git pull...")
     success, output = run_git_command(['git', 'pull'], GIT_REPO_PATH)
     if success:
-        print(f"   ✅ Pull 成功")
+        logger.info(f"   ✅ Pull 成功")
         return True
     else:
-        print(f"   ❌ Pull 失败: {output}")
+        logger.info(f"   ❌ Pull 失败: {output}")
         return False
 
 
 def git_push() -> bool:
     """单独的 Push 函数"""
-    print(f"   📤 执行 git push (批量推送)...")
+    logger.info(f"   📤 执行 git push (批量推送)...")
     success, output = run_git_command(['git', 'push'], GIT_REPO_PATH)
     if success:
-        print(f"   ✅ Push 成功")
+        logger.info(f"   ✅ Push 成功")
         return True
     else:
-        print(f"   ❌ Push 失败: {output}")
-        print(f"   ℹ️  更改已保存在本地，下次运行时将再次尝试推送")
+        logger.error(f"   ❌ Push 失败: {output}")
+        logger.warning(f"   ℹ️  更改已保存在本地，下次运行时将再次尝试推送")
         return False
 
 
@@ -112,15 +114,15 @@ def update_single_video(uploaded_file: Path) -> bool:
     """
     更新单个视频的总结到本地 Git 仓库 (不推送)
     """
-    print(f"\n--- 处理: {uploaded_file.name} ---")
+    logger.info(f"\n--- 处理: {uploaded_file.name} ---")
     
     # 1. 读取 ID
     try:
         video_id = uploaded_file.read_text().strip()
         if len(video_id) != 11:
-            print(f"   ⚠️  ID 长度异常: {video_id}")
+            logger.error(f"   ⚠️  ID 长度异常: {video_id}")
     except Exception as e:
-        print(f"   ❌ 读取 .uploaded 失败: {e}")
+        logger.error(f"   ❌ 读取 .uploaded 失败: {e}")
         return False
 
     # 2. 检查标记
@@ -135,7 +137,7 @@ def update_single_video(uploaded_file: Path) -> bool:
     try:
         detailed_file = find_detailed_txt(uploaded_file)
     except FileNotFoundError:
-        print(f"   ⏳ 总结文件尚未生成，跳过")
+        logger.warning(f"   ⏳ 总结文件尚未生成，跳过")
         return False
     
     # 4. 写入 Git 目录
@@ -147,7 +149,7 @@ def update_single_video(uploaded_file: Path) -> bool:
         content = detailed_file.read_text(encoding='utf-8')
         target_file.write_text(content, encoding='utf-8')
     except Exception as e:
-        print(f"   ❌ 文件读写失败: {e}")
+        logger.error(f"   ❌ 文件读写失败: {e}")
         return False
 
     # 5. Git Add & Commit
@@ -165,15 +167,15 @@ def update_single_video(uploaded_file: Path) -> bool:
     success, output = run_git_command(['git', 'commit', '-m', commit_msg], GIT_REPO_PATH)
     
     if success:
-        print(f"   ✅ 已提交 (Commit)")
+        logger.info(f"   ✅ 已提交 (Commit)")
         marker_file.write_text(f"Committed at: {datetime.now()}")
         return True
     elif 'nothing to commit' in output or 'no changes' in output.lower():
-        print(f"   ℹ️  内容无变化")
+        logger.warning(f"   ℹ️  内容无变化")
         marker_file.write_text(f"No changes: {datetime.now()}")
         return True
     else:
-        print(f"   ❌ Commit 失败: {output}")
+        logger.error(f"   ❌ Commit 失败: {output}")
         return False
 
 
@@ -182,9 +184,9 @@ def update_all_to_git() -> int:
     if not git_config.get('enabled', False):
         return 0
 
-    print(f"\n{'='*60}")
-    print(f"📦 开始同步总结到 Git")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"📦 开始同步总结到 Git")
+    logger.info(f"{'='*60}")
 
     if not validate_git_repo():
         return 0
@@ -206,17 +208,17 @@ def update_all_to_git() -> int:
 
     # 3. 统一最后 Push
     # 只要有处理成功的文件，或者为了保险起见（防止之前有未推送的提交），都执行一次 Push
-    print(f"\n{'-'*60}")
+    logger.info(f"\n{'-'*60}")
     if changes_made:
         git_push()
     else:
         # 即使这次没有新文件，也可以检查一下有没有本地积压的提交
         success, output = run_git_command(['git', 'cherry', '-v'], GIT_REPO_PATH)
         if success and output.strip():
-            print(f"   ℹ️  检测到本地有未推送的提交，执行推送...")
+            logger.info(f"   ℹ️  检测到本地有未推送的提交，执行推送...")
             git_push()
         else:
-            print(f"   ✅ 没有需要推送的更新")
+            logger.info(f"   ✅ 没有需要推送的更新")
 
     return success_count
 

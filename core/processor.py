@@ -5,6 +5,7 @@
 
 import os
 import threading
+import logging
 from typing import Dict, Any, Tuple
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from utils.video_optimizer import VideoOptimizer
 from .transcriber import Transcriber
 from .summarizer import Summarizer
 from models import ModelManager
-
+logger = logging.getLogger(__name__)
 
 class VideoProcessor:
     """视频处理协调器"""
@@ -56,29 +57,29 @@ class VideoProcessor:
         """
         video_name = os.path.basename(video_path)
         
-        print(f"\n{'='*70}")
-        print(f"📹 处理视频: {video_name}")
-        print(f"{'='*70}")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"📹 处理视频: {video_name}")
+        logger.info(f"{'='*70}")
         
         # 检查视频信息
         info = VideoInfo(video_path)
-        print(f"\n📊 视频信息:")
-        print(f"   时长: {info.duration_minutes:.1f} 分钟")
-        print(f"   大小: {info.file_size_mb:.1f} MB")
+        logger.info(f"\n📊 视频信息:")
+        logger.info(f"   时长: {info.duration_minutes:.1f} 分钟")
+        logger.info(f"   大小: {info.file_size_mb:.1f} MB")
         
         # 检查是否需要分段（目前只警告）
         segment_threshold = self.config.get('processing', {}).get('segment_threshold', 90)
         if info.should_segment(segment_threshold):
-            print(f"\n⚠️  视频时长 ({info.duration_minutes:.1f} 分钟) 超过阈值 ({segment_threshold} 分钟)")
-            print(f"⚠️  当前版本暂不支持自动分段，可能会失败")
-            print(f"⚠️  建议手动分割视频或等待后续更新")
+            logger.warning(f"\n⚠️  视频时长 ({info.duration_minutes:.1f} 分钟) 超过阈值 ({segment_threshold} 分钟)")
+            logger.warning(f"⚠️  当前版本暂不支持自动分段，可能会失败")
+            logger.warning(f"⚠️  建议手动分割视频或等待后续更新")
         
         # 根据模式处理
         if self.use_video_mode:
-            print(f"\n🎬 模式: 视频直传（Gemini 直接分析）")
+            logger.info(f"\n🎬 模式: 视频直传（Gemini 直接分析）")
             return self._process_video_direct(video_path)
         else:
-            print(f"\n📝 模式: Whisper 转录 + AI 总结")
+            logger.info(f"\n📝 模式: Whisper 转录 + AI 总结")
             return self._process_whisper(video_path)
     
     def _process_video_direct(self, video_path: str) -> bool:
@@ -88,7 +89,7 @@ class VideoProcessor:
             strategy = self.optimizer.get_strategy(video_path)
             
             if strategy is None:
-                print(f"\n❌ 视频过长，无法处理")
+                logger.error(f"\n❌ 视频过长，无法处理")
                 return False
             
             # 🆕 根据策略处理视频
@@ -100,47 +101,53 @@ class VideoProcessor:
             # 并行处理：同时提取视频和音频
             transcribe_enabled = self.config.get('processing', {}).get('transcribe_audio', False)
             audio_path_for_transcribe = [None]  # 用list传引用
-
-            def prepare_audio_async():
+            transcript_result_ref = [None]      # 转文字结果
+            
+            def prepare_audio_and_transcribe():
                 if transcribe_enabled:
-                    print(f"   🎵 [并行] 提取文字起こし用音频...")
-                    audio_path_for_transcribe[0] = extract_audio(original_path, speedup=1.0)
+                    logger.info(f"   🎵 [并行] 提取文字起こし用音频...")
+                    audio_path = extract_audio(original_path, speedup=1.0)
+                    audio_path_for_transcribe[0] = audio_path
+                    if audio_path:
+                        logger.info(f"   🎙️ [并行] 开始音频转文字...")
+                        transcript_result_ref[0] = self.model_manager.transcribe_from_audio(audio_path)
+                        logger.info(f"   ✅ [并行] 音频转文字完成")
 
             # 启动音频提取线程
-            audio_thread = threading.Thread(target=prepare_audio_async)
+            audio_thread = threading.Thread(target=prepare_audio_and_transcribe)
             audio_thread.start()
 
             # 主线程处理视频（总结用）
             if strategy['audio_only']:
-                print(f"\n🎵 第5档: 提取总结用音频")
+                logger.info(f"\n🎵 第5档: 提取总结用音频")
                 processed_path = extract_audio(video_path, strategy['speedup'])
                 is_temp = (processed_path != original_path)
             elif strategy['speedup'] != 1.0:
-                print(f"\n⚡ 视频加速: {strategy['speedup']}x")
+                logger.info(f"\n⚡ 视频加速: {strategy['speedup']}x")
                 processed_path = speed_up_video(video_path, strategy['speedup'])
                 is_temp = (processed_path != original_path)
-
-            # 等待音频提取完成
-            audio_thread.join()
-            print(f"   ✅ [并行] 音频提取完成")
             
             # 🆕 调用 API 生成（传递 fps 参数）
-            print(f"\n📹 分析{'音频' if strategy['audio_only'] else '视频'}: {os.path.basename(original_path)}")
+            logger.info(f"\n📹 分析{'音频' if strategy['audio_only'] else '视频'}: {os.path.basename(original_path)}")
             full_response, model_name, duration = self.model_manager.summarize_from_video(
                 processed_path,
                 fps=strategy['fps']  # 🆕 传递 fps
             )
+            # 等待音频转文字完成（与视频总结并行执行）
+            logger.info(f"   ⏳ 等待音频转文字完成...")
+            audio_thread.join()
+            logger.info(f"   ✅ 两个任务均完成")
             
             # 清理临时文件
             if is_temp:
                 try:
                     os.unlink(processed_path)
-                    print(f"   🗑️  已清理临时文件")
+                    logger.info(f"   🗑️  已清理临时文件")
                 except:
                     pass
                 
             if not full_response:
-                print(f"\n❌ {'音频' if strategy['audio_only'] else '视频'}分析失败")
+                logger.error(f"\n❌ {'音频' if strategy['audio_only'] else '视频'}分析失败")
                 return False
             
             # 分割两个版本
@@ -150,51 +157,51 @@ class VideoProcessor:
             
             # 2. 验证逻辑
             if not detailed_version or not youtube_version:
-                print(f"⚠️  分割失败，使用备用方案")
+                logger.warning(f"⚠️  分割失败，使用备用方案")
                 detailed_version = full_response
                 youtube_version = generate_youtube_simple(detailed_version)
                 invalid_raw_content = full_response # 保存整个 AI 回复
             elif not Summarizer.validate_youtube_format(youtube_version):
-                print(f"⚠️  YouTube 版格式验证失败，使用代码生成")
+                logger.warning(f"⚠️  YouTube 版格式验证失败，使用代码生成")
                 invalid_raw_content = youtube_version # 只保存那个格式不对的版本
                 youtube_version = generate_youtube_simple(detailed_version)
             
             # 显示结果
-            print(f"\n{'='*70}")
-            print(f"📋 详细版:")
-            print(f"{'='*70}")
-            print(detailed_version[:400] + "..." if len(detailed_version) > 400 else detailed_version)
-            print(f"{'='*70}\n")
+            logger.info(f"\n{'='*70}")
+            logger.info(f"📋 详细版:")
+            logger.info(f"{'='*70}")
+            logger.info(detailed_version[:400] + "..." if len(detailed_version) > 400 else detailed_version)
+            logger.info(f"{'='*70}\n")
             
-            print(f"\n{'='*70}")
-            print(f"📺 YouTube 版:")
-            print(f"{'='*70}")
-            print(youtube_version)
-            print(f"{'='*70}\n")
+            logger.info(f"\n{'='*70}")
+            logger.info(f"📺 YouTube 版:")
+            logger.info(f"{'='*70}")
+            logger.info(youtube_version)
+            logger.info(f"{'='*70}\n")
             
             # 保存结果
             # 文字起こし
             transcript = f"[{'音声のみ' if strategy['audio_only'] else '動画直接分析'}モード - 文字起こしなし]"
             timeline = []
 
+            transcript_result = None
             if transcribe_enabled:
-                print(f"\n🎙️ 音声文字起こし開始...")
-                audio_path = audio_path_for_transcribe[0]  # 直接用已经提取好的
-                is_audio_temp = (audio_path is not None and audio_path != original_path)
-                
-                transcript_result = self.model_manager.transcribe_from_audio(audio_path) if audio_path else None
-                
-                if is_audio_temp:
+                audio_path = audio_path_for_transcribe[0]
+                transcript_result = transcript_result_ref[0]
+
+                # 两个都结束后再清理音频临时文件
+                if audio_path and audio_path != original_path:
                     try:
                         os.unlink(audio_path)
+                        logger.info(f"   🗑️  已清理音频临时文件")
                     except:
                         pass
                     
                 if transcript_result:
                     transcript = transcript_result
-                    print(f"✅ 文字起こし完了 ({len(transcript_result):,} 文字)")
+                    logger.info(f"✅ 文字起こし完了 ({len(transcript_result):,} 文字)")
                 else:
-                    print(f"⚠️ 文字起こし失敗、スキップ")
+                    logger.warning(f"⚠️ 文字起こし失敗、スキップ")
             
             output_dir = self.config['output_dir']
             # 从 config 获取开关（默认为 True）
@@ -210,14 +217,14 @@ class VideoProcessor:
                 transcript_model=transcript_model
             )
             
-            print(f"💾 结果已保存:")
-            print(f"   📄 详细版: {os.path.basename(detailed_txt)}")
-            print(f"   📺 YouTube版: {os.path.basename(youtube_txt)}")
+            logger.info(f"💾 结果已保存:")
+            logger.info(f"   📄 详细版: {os.path.basename(detailed_txt)}")
+            logger.info(f"   📺 YouTube版: {os.path.basename(youtube_txt)}")
             
             return True
             
         except Exception as e:
-            print(f"\n❌ 处理失败: {e}")
+            logger.error(f"\n❌ 处理失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -229,18 +236,18 @@ class VideoProcessor:
             transcript, segments = self.transcriber.transcribe(video_path)
             
             if not transcript:
-                print(f"❌ 转录失败")
+                logger.error(f"❌ 转录失败")
                 return False
             
             # 步骤2：AI 总结
-            print(f"\n📝 步骤 2: AI总结")
-            print(f"{'='*70}")
+            logger.info(f"\n📝 步骤 2: AI总结")
+            logger.info(f"{'='*70}")
             
             duration = segments[-1]['end'] if segments else 0
             summary, model_name = self.model_manager.summarize_from_text(transcript, duration)
             
             if not summary:
-                print(f"\n❌ 所有模型都失败了")
+                logger.error(f"\n❌ 所有模型都失败了")
                 
                 # 只保存转录
                 output_dir = self.config['output_dir']
@@ -253,29 +260,29 @@ class VideoProcessor:
                 with open(transcript_file, 'w', encoding='utf-8') as f:
                     f.write(transcript)
                 
-                print(f"💾 转录已保存: {transcript_file}")
+                logger.info(f"💾 转录已保存: {transcript_file}")
                 return False
             
             # 显示总结
-            print(f"\n{'='*70}")
-            print(f"📋 总结结果:")
-            print(f"{'='*70}")
-            print(summary[:500] + "..." if len(summary) > 500 else summary)
-            print(f"{'='*70}\n")
+            logger.info(f"\n{'='*70}")
+            logger.info(f"📋 总结结果:")
+            logger.info(f"{'='*70}")
+            logger.info(summary[:500] + "..." if len(summary) > 500 else summary)
+            logger.info(f"{'='*70}\n")
             
             # 步骤3：生成输出
-            print(f"\n📝 步骤 3: 生成输出")
-            print(f"{'='*70}")
+            logger.info(f"\n📝 步骤 3: 生成输出")
+            logger.info(f"{'='*70}")
             
             num_points = self.config['timeline']['num_points']
             timeline = create_timeline(segments, num_points)
             youtube_comment = generate_youtube_simple(summary)
             
-            print(f"✅ 时间轴已生成 ({len(timeline)} 个时间点)")
-            print(f"✅ YouTube评论已生成")
+            logger.info(f"✅ 时间轴已生成 ({len(timeline)} 个时间点)")
+            logger.info(f"✅ YouTube评论已生成")
             
             # 步骤4：保存结果
-            print(f"\n💾 保存结果...")
+            logger.info(f"\n💾 保存结果...")
             
             output_dir = self.config['output_dir']
             detailed_txt, youtube_txt, json_file = save_results(
@@ -283,15 +290,15 @@ class VideoProcessor:
                 youtube_comment, model_name, output_dir
             )
             
-            print(f"✅ 结果已保存:")
-            print(f"   📄 详细版: {os.path.basename(detailed_txt)}")
-            print(f"   📺 YouTube版: {os.path.basename(youtube_txt)}")
-            print(f"   📊 JSON: {os.path.basename(json_file)}")
+            logger.info(f"✅ 结果已保存:")
+            logger.info(f"   📄 详细版: {os.path.basename(detailed_txt)}")
+            logger.info(f"   📺 YouTube版: {os.path.basename(youtube_txt)}")
+            logger.info(f"   📊 JSON: {os.path.basename(json_file)}")
             
             return True
             
         except Exception as e:
-            print(f"\n❌ 处理失败: {e}")
+            logger.error(f"\n❌ 处理失败: {e}")
             import traceback
             traceback.print_exc()
             return False

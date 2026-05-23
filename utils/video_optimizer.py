@@ -3,8 +3,10 @@
 视频优化策略 - 根据视频时长决定最优处理方式
 """
 
+import logging
 from typing import Dict, Any, Optional
 from .video import VideoInfo
+logger = logging.getLogger(__name__)
 
 
 class VideoOptimizer:
@@ -52,12 +54,12 @@ class VideoOptimizer:
         duration_minutes = info.duration_minutes
         
         if duration_minutes == 0:
-            print(f"⚠️  无法获取视频时长")
+            logger.warning(f"⚠️  无法获取视频时长")
             return None
         
-        print(f"\n📊 视频分析:")
-        print(f"   时长: {duration_minutes:.1f} 分钟 ({info.duration:.0f} 秒)")
-        print(f"   大小: {info.file_size_mb:.1f} MB")
+        logger.info(f"\n📊 视频分析:")
+        logger.info(f"   时长: {duration_minutes:.1f} 分钟 ({info.duration:.0f} 秒)")
+        logger.info(f"   大小: {info.file_size_mb:.1f} MB")
         
         # 根据时长选择策略
         if duration_minutes <= 40:
@@ -77,12 +79,12 @@ class VideoOptimizer:
         estimated_tokens = self._estimate_tokens(info, strategy)
         strategy['estimated_tokens'] = estimated_tokens
         
-        print(f"\n🎯 优化策略:")
-        print(f"   {strategy['description']}")
-        print(f"   预计 Token 消耗: {estimated_tokens:,.0f}")
+        logger.info(f"\n🎯 优化策略:")
+        logger.info(f"   {strategy['description']}")
+        logger.info(f"   预计 Token 消耗: {estimated_tokens:,.0f}")
         
         if estimated_tokens > self.EFFECTIVE_LIMIT:
-            print(f"   ⚠️  警告: 预计超出安全限制 ({self.EFFECTIVE_LIMIT:,.0f})")
+            logger.warning(f"   ⚠️  警告: 预计超出安全限制 ({self.EFFECTIVE_LIMIT:,.0f})")
         
         return strategy
     
@@ -148,12 +150,12 @@ class VideoOptimizer:
     
     def _reject_too_long(self, info: VideoInfo) -> None:
         """拒绝超长视频"""
-        print(f"\n❌ 视频过长，无法处理")
-        print(f"   当前时长: {info.duration_minutes:.1f} 分钟")
-        print(f"   最大支持: 240 分钟（4 小时）")
-        print(f"\n💡 建议:")
-        print(f"   1. 手动分割视频")
-        print(f"   2. 或使用视频编辑工具剪辑")
+        logger.error(f"\n❌ 视频过长，无法处理")
+        logger.error(f"   当前时长: {info.duration_minutes:.1f} 分钟")
+        logger.error(f"   最大支持: 240 分钟（4 小时）")
+        logger.error(f"\n💡 建议:")
+        logger.error(f"   1. 手动分割视频")
+        logger.error(f"   2. 或使用视频编辑工具剪辑")
         return None
     
     def _estimate_tokens(self, info: VideoInfo, strategy: Dict[str, Any]) -> float:

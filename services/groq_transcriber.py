@@ -10,10 +10,11 @@ import tempfile
 import subprocess
 import time
 import json
+import logging
+import requests
 from typing import Optional
 from pathlib import Path
-
-import requests
+logger = logging.getLogger(__name__)
 
 
 class GroqTranscriber:
@@ -40,7 +41,7 @@ class GroqTranscriber:
 
         key_path = Path(__file__).parent.parent / key_file
         if not key_path.exists():
-            print(f"   ❌ Groqキーファイルが見つかりません: {key_path}")
+            logger.error(f"   ❌ Groqキーファイルが見つかりません: {key_path}")
             return []
 
         keys = []
@@ -49,7 +50,7 @@ class GroqTranscriber:
             if line and not line.startswith('#'):
                 keys.append(line)
 
-        print(f"   ✅ Groqキー読み込み完了: {len(keys)} アカウント")
+        logger.info(f"   ✅ Groqキー読み込み完了: {len(keys)} アカウント")
         return keys
 
     # ------------------------------------------------------------------
@@ -73,9 +74,9 @@ class GroqTranscriber:
         size_bytes = int(info.get('size', 0))
         size_mb = size_bytes / (1024 * 1024)
 
-        print(f"   📊 音声情報:")
-        print(f"      時間: {duration/60:.1f} 分 ({duration:.1f} 秒)")
-        print(f"      サイズ: {size_mb:.1f} MB")
+        logger.info(f"   📊 音声情報:")
+        logger.info(f"      時間: {duration/60:.1f} 分 ({duration:.1f} 秒)")
+        logger.info(f"      サイズ: {size_mb:.1f} MB")
         return {'duration': duration, 'size_mb': size_mb}
 
     # ------------------------------------------------------------------
@@ -94,8 +95,8 @@ class GroqTranscriber:
         Returns:
             切り目候補の秒数リスト（昇順）
         """
-        print(f"\n   🔍 静音区間を検出中...")
-        print(f"      閾値: {self.silence_threshold} dB  /  最短静音: {self.silence_duration} ms")
+        logger.info(f"\n   🔍 静音区間を検出中...")
+        logger.info(f"      閾値: {self.silence_threshold} dB  /  最短静音: {self.silence_duration} ms")
 
         cmd = [
             'ffmpeg', '-i', audio_path,
@@ -127,9 +128,9 @@ class GroqTranscriber:
             midpoint = (s + e) / 2.0
             cut_points.append(midpoint)
 
-        print(f"      検出した静音区間: {len(cut_points)} 箇所")
+        logger.info(f"      検出した静音区間: {len(cut_points)} 箇所")
         if cut_points:
-            print(f"      例: {[f'{p:.1f}s' for p in cut_points[:5]]}" +
+            logger.info(f"      例: {[f'{p:.1f}s' for p in cut_points[:5]]}" +
                   (" ..." if len(cut_points) > 5 else ""))
 
         return sorted(cut_points)
@@ -216,11 +217,11 @@ class GroqTranscriber:
         )
 
         if result.returncode != 0 or not os.path.exists(tmp.name):
-            print(f"      ❌ チャンク {index+1} 切り出し失敗")
+            logger.error(f"      ❌ チャンク {index+1} 切り出し失敗")
             return None
 
         size_mb = os.path.getsize(tmp.name) / (1024 * 1024)
-        print(f"      チャンク {index+1:03d}: {start_sec/60:.1f}〜{end_sec/60:.1f} 分  "
+        logger.info(f"      チャンク {index+1:03d}: {start_sec/60:.1f}〜{end_sec/60:.1f} 分  "
               f"({duration_sec:.0f}秒 / {size_mb:.1f}MB)  →  {os.path.basename(tmp.name)}")
         return tmp.name
 
@@ -243,8 +244,8 @@ class GroqTranscriber:
         # カット計画を作成
         plan = self._build_cut_plan(cut_points, duration, target_sec)
 
-        print(f"\n   ✂️  カット計画: {len(plan)} チャンク")
-        print(f"      目標チャンク長: {target_sec} 秒")
+        logger.info(f"\n   ✂️  カット計画: {len(plan)} チャンク")
+        logger.info(f"      目標チャンク長: {target_sec} 秒")
 
         chunks = []
         for i, (start, end) in enumerate(plan):
@@ -252,9 +253,9 @@ class GroqTranscriber:
             if chunk_path:
                 chunks.append((chunk_path, start))
             else:
-                print(f"      ⚠️  チャンク {i+1} をスキップ")
+                logger.warning(f"      ⚠️  チャンク {i+1} をスキップ")
 
-        print(f"\n   ✅ 分割完了: {len(chunks)}/{len(plan)} チャンク生成")
+        logger.info(f"\n   ✅ 分割完了: {len(chunks)}/{len(plan)} チャンク生成")
         return chunks
 
     # ------------------------------------------------------------------
@@ -279,7 +280,7 @@ class GroqTranscriber:
             key_index = (self.current_key_index + attempt) % len(self.api_keys)
             api_key = self.api_keys[key_index]
 
-            print(f"      📤 送信中 [キー {key_index+1}/{len(self.api_keys)}] ...")
+            logger.info(f"      📤 送信中 [キー {key_index+1}/{len(self.api_keys)}] ...")
 
             try:
                 with open(chunk_path, 'rb') as f:
@@ -306,7 +307,7 @@ class GroqTranscriber:
                     segments = data.get('segments', [])
                     chunk_text = data.get('text', '')
 
-                    print(f"      ✅ 成功: {len(segments)} セグメント / {len(chunk_text)} 文字")
+                    logger.info(f"      ✅ 成功: {len(segments)} セグメント / {len(chunk_text)} 文字")
 
                     # タイムスタンプ付きテキストを構築
                     result = []
@@ -332,28 +333,28 @@ class GroqTranscriber:
                     return ''.join(result)
 
                 elif response.status_code == 429:
-                    print(f"      ⚠️  キー {key_index+1} レート制限 → 次のキーへ切り替え")
+                    logger.warning(f"      ⚠️  キー {key_index+1} レート制限 → 次のキーへ切り替え")
                     self.current_key_index = (key_index + 1) % len(self.api_keys)
                     time.sleep(2)
                     continue
 
                 elif response.status_code == 413:
-                    print(f"      ❌ キー {key_index+1}: ファイルサイズ超過 (413)")
+                    logger.error(f"      ❌ キー {key_index+1}: ファイルサイズ超過 (413)")
                     return None
 
                 else:
-                    print(f"      ❌ キー {key_index+1}: HTTPエラー {response.status_code}")
-                    print(f"         詳細: {response.text[:200]}")
+                    logger.error(f"      ❌ キー {key_index+1}: HTTPエラー {response.status_code}")
+                    logger.error(f"         詳細: {response.text[:200]}")
                     continue
 
             except requests.exceptions.Timeout:
-                print(f"      ⚠️  キー {key_index+1}: タイムアウト")
+                logger.warning(f"      ⚠️  キー {key_index+1}: タイムアウト")
                 continue
             except Exception as e:
-                print(f"      ❌ キー {key_index+1}: 例外発生 - {e}")
+                logger.error(f"      ❌ キー {key_index+1}: 例外発生 - {e}")
                 continue
 
-        print(f"      ❌ 全キーで失敗")
+        logger.error(f"      ❌ 全キーで失敗")
         return None
 
     # ------------------------------------------------------------------
@@ -373,40 +374,40 @@ class GroqTranscriber:
             転写テキスト（タイムスタンプ付き） or None
         """
         if not self.api_keys:
-            print("   ❌ Groq APIキーが設定されていません")
+            logger.error("   ❌ Groq APIキーが設定されていません")
             return None
 
-        print(f"\n{'='*60}")
-        print(f"🎙️  Groq Whisper 転写開始")
-        print(f"{'='*60}")
-        print(f"   モデル: {self.model}")
-        print(f"   目標チャンク長: {self.chunk_duration} 秒")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"🎙️  Groq Whisper 転写開始")
+        logger.info(f"{'='*60}")
+        logger.info(f"   モデル: {self.model}")
+        logger.info(f"   目標チャンク長: {self.chunk_duration} 秒")
 
         # Step 1: 音声情報取得
         info = self._get_audio_info(audio_path)
         if info['duration'] == 0:
-            print("   ❌ 音声時間を取得できませんでした")
+            logger.error("   ❌ 音声時間を取得できませんでした")
             return None
 
         # Step 2: silence-aware 分割
-        print(f"\n   📂 チャンク分割を開始します...")
+        logger.info(f"\n   📂 チャンク分割を開始します...")
         chunks = self._split_audio_by_silence(audio_path, info['duration'])
 
         if not chunks:
-            print("   ❌ チャンク生成に失敗しました")
+            logger.error("   ❌ チャンク生成に失敗しました")
             return None
 
         # Step 3: 各チャンクを転写
-        print(f"\n{'='*60}")
-        print(f"   🚀 転写開始: 計 {len(chunks)} チャンク")
-        print(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"   🚀 転写開始: 計 {len(chunks)} チャンク")
+        logger.info(f"{'='*60}")
 
         results = []
         failed_chunks = []
         total_chars = 0
 
         for i, (chunk_path, start_sec) in enumerate(chunks):
-            print(f"\n   ── チャンク {i+1}/{len(chunks)} "
+            logger.info(f"\n   ── チャンク {i+1}/{len(chunks)} "
                   f"[開始: {start_sec/60:.1f}分] ──")
 
             text = self._transcribe_chunk(
@@ -425,30 +426,30 @@ class GroqTranscriber:
             if text:
                 results.append(text)
                 total_chars += len(text)
-                print(f"      📝 累計文字数: {total_chars:,} 文字")
+                logger.info(f"      📝 累計文字数: {total_chars:,} 文字")
             else:
                 placeholder = f"\n[チャンク {i+1} 転写失敗 ({start_sec/60:.1f}分〜)]\n"
                 results.append(placeholder)
                 failed_chunks.append(i + 1)
-                print(f"      ⚠️  プレースホルダーを挿入しました")
+                logger.warning(f"      ⚠️  プレースホルダーを挿入しました")
 
             # レート制限対策: チャンク間に少し待機
             if i < len(chunks) - 1:
                 time.sleep(0.5)
 
         # Step 4: 結合
-        print(f"\n{'='*60}")
-        print(f"   📋 転写結果まとめ")
-        print(f"{'='*60}")
-        print(f"   総チャンク数: {len(chunks)}")
-        print(f"   成功: {len(chunks) - len(failed_chunks)} チャンク")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"   📋 転写結果まとめ")
+        logger.info(f"{'='*60}")
+        logger.info(f"   総チャンク数: {len(chunks)}")
+        logger.info(f"   成功: {len(chunks) - len(failed_chunks)} チャンク")
         if failed_chunks:
-            print(f"   失敗: {len(failed_chunks)} チャンク (番号: {failed_chunks})")
-        print(f"   総文字数: {total_chars:,} 文字")
+            logger.error(f"   失敗: {len(failed_chunks)} チャンク (番号: {failed_chunks})")
+        logger.info(f"   総文字数: {total_chars:,} 文字")
 
         if not results:
             return None
 
         full_text = '\n'.join(results)
-        print(f"\n   ✅ Groq転写完了 → Gemini後処理へ渡します")
+        logger.info(f"\n   ✅ Groq転写完了 → Gemini後処理へ渡します")
         return full_text

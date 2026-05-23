@@ -6,7 +6,15 @@ Oracle对象存储下载模块
 import oci
 import sys
 import yaml 
+import logging
 from pathlib import Path
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    force=True  # 强制应用配置，防止被其他库拦截
+)
+logger = logging.getLogger(__name__)
 
 # 加载配置
 def load_key_config():
@@ -23,7 +31,7 @@ def load_key_config():
                 lines = [line.strip() for line in f.readlines()]
                 return lines[0], lines[1], lines[2] if len(lines) > 2 else 'ap-tokyo-1'
     
-    print("❌ 找不到 config/bucket_credentials.key")
+    logger.error("❌ 找不到 config/bucket_credentials.key")
     sys.exit(1)
 
 def load_yaml_config():
@@ -40,7 +48,7 @@ def load_yaml_config():
                 config = yaml.safe_load(f)
                 return config.get('oracle_download', {})
     
-    print("❌ 找不到 config/config.yaml")
+    logger.error("❌ 找不到 config/config.yaml")
     sys.exit(1)
 
 # 加载配置
@@ -56,17 +64,17 @@ class OracleBucketDownloader:
         try:
             config = oci.config.from_file()
             self.client = oci.object_storage.ObjectStorageClient(config)
-            print("✅ 使用配置文件认证 (~/.oci/config)")
+            logger.info("✅ 使用配置文件认证 (~/.oci/config)")
         except Exception as e:
-            print(f"❌ 初始化失败: {e}")
+            logger.error(f"❌ 初始化失败: {e}")
             raise
     
     def list_videos(self):
         try:
-            print(f"\n📋 列出视频:")
-            print(f"   Namespace: {NAMESPACE}")
-            print(f"   Bucket: {BUCKET_NAME}")
-            print(f"   前缀: {VIDEO_PREFIX}")
+            logger.info(f"\n📋 列出视频:")
+            logger.info(f"   Namespace: {NAMESPACE}")
+            logger.info(f"   Bucket: {BUCKET_NAME}")
+            logger.info(f"   前缀: {VIDEO_PREFIX}")
             
             response = self.client.list_objects(
                 namespace_name=NAMESPACE,
@@ -79,10 +87,10 @@ class OracleBucketDownloader:
                 if any(obj.name.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
             ]
             
-            print(f"   找到 {len(videos)} 个视频\n")
+            logger.info(f"   找到 {len(videos)} 个视频\n")
             return videos
         except Exception as e:
-            print(f"❌ 列出视频失败: {e}")
+            logger.error(f"❌ 列出视频失败: {e}")
             return []
     
     def download_video(self, object_name: str, local_path: Path) -> bool:
@@ -95,7 +103,7 @@ class OracleBucketDownloader:
             
             file_size = int(head_response.headers.get('Content-Length', 0))
             file_size_mb = file_size / (1024 * 1024)
-            print(f"   大小: {file_size_mb:.1f} MB")
+            logger.info(f"   大小: {file_size_mb:.1f} MB")
             
             local_path.parent.mkdir(parents=True, exist_ok=True)
             
@@ -113,43 +121,42 @@ class OracleBucketDownloader:
                     
                     if file_size > 0:
                         percent = (downloaded / file_size) * 100
-                        print(f"\r   进度: {percent:.1f}% ({downloaded/(1024*1024):.1f}/{file_size_mb:.1f} MB)", end='', flush=True)
+                        logger.info(f"   进度: {percent:.1f}% ({downloaded/(1024*1024):.1f}/{file_size_mb:.1f} MB)")
             
-            print()
-            print(f"✅ 下载完成: {local_path.name}")
+            logger.info(f"✅ 下载完成: {local_path.name}")
             return True
         except Exception as e:
-            print(f"❌ 下载失败: {e}")
+            logger.error(f"❌ 下载失败: {e}")
             return False
     
     def download_all_videos(self):
-        print(f"\n{'='*70}")
-        print(f"📥 Oracle 对象存储视频下载")
-        print(f"{'='*70}\n")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"📥 Oracle 对象存储视频下载")
+        logger.info(f"{'='*70}\n")
         
         videos = self.list_videos()
         
         if not videos:
-            print("❌ 没有找到视频文件")
+            logger.error("❌ 没有找到视频文件")
             return
         
-        print(f"📹 找到 {len(videos)} 个视频:\n")
+        logger.info(f"📹 找到 {len(videos)} 个视频:\n")
         for i, video in enumerate(videos, 1):
-            print(f"   {i}. {video.split('/')[-1]}")
+            logger.info(f"   {i}. {video.split('/')[-1]}")
         
         success_count = 0
         
         for i, video_name in enumerate(videos, 1):
-            print(f"\n{'='*70}")
-            print(f"[{i}/{len(videos)}] {video_name.split('/')[-1]}")
-            print(f"{'='*70}")
+            logger.info(f"\n{'='*70}")
+            logger.info(f"[{i}/{len(videos)}] {video_name.split('/')[-1]}")
+            logger.info(f"{'='*70}")
             
             filename = video_name.split('/')[-1]
             local_path = DOWNLOAD_FOLDER / filename
             
             if local_path.exists():
                 size_mb = local_path.stat().st_size / (1024 * 1024)
-                print(f"⏭️  已存在 ({size_mb:.1f} MB)，跳过")
+                logger.warning(f"⏭️  已存在 ({size_mb:.1f} MB)，跳过")
                 success_count += 1
                 continue
             
@@ -179,19 +186,19 @@ class OracleBucketDownloader:
                         for chunk in response.data.raw.stream(1024 * 1024, decode_content=False):
                             f.write(chunk)
                     
-                    print(f"✅ 已下载标记文件: {marker_local_path.name}")
+                    logger.info(f"✅ 已下载标记文件: {marker_local_path.name}")
                 except oci.exceptions.ServiceError as e:
                     if e.status == 404:
-                        print(f"ℹ️  未找到标记文件 (可能是旧视频)")
+                        logger.error(f"ℹ️  未找到标记文件 (可能是旧视频)")
                     else:
-                        print(f"⚠️  标记文件下载失败: {e}")
+                        logger.error(f"⚠️  标记文件下载失败: {e}")
                 except Exception as e:
-                    print(f"⚠️  标记文件下载失败: {e}")
+                    logger.error(f"⚠️  标记文件下载失败: {e}")
 
-        print(f"\n{'='*70}")
-        print(f"✅ 下载完成: {success_count}/{len(videos)} 个文件")
-        print(f"📁 保存在: {DOWNLOAD_FOLDER.absolute()}")
-        print(f"{'='*70}")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"✅ 下载完成: {success_count}/{len(videos)} 个文件")
+        logger.info(f"📁 保存在: {DOWNLOAD_FOLDER.absolute()}")
+        logger.info(f"{'='*70}")
 
 
 def main():
@@ -199,10 +206,10 @@ def main():
         downloader = OracleBucketDownloader()
         downloader.download_all_videos()
     except KeyboardInterrupt:
-        print(f"\n\n⚠️  用户中断")
+        logger.warning(f"\n\n⚠️  用户中断")
         sys.exit(0)
     except Exception as e:
-        print(f"\n❌ 错误: {e}")
+        logger.error(f"\n❌ 错误: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

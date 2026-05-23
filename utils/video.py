@@ -6,8 +6,9 @@
 import os
 import subprocess
 import tempfile
+import logging
 from typing import Optional
-
+logger = logging.getLogger(__name__)
 
 class VideoInfo:
     """视频信息类"""
@@ -41,7 +42,7 @@ class VideoInfo:
             )
             return float(result.stdout.strip())
         except Exception as e:
-            print(f"⚠️  无法获取视频时长: {e}")
+            logger.warning(f"⚠️  无法获取视频时长: {e}")
             return 0.0
     
     @property
@@ -86,7 +87,7 @@ def speed_up_video(input_path: str, speedup: float) -> str:
     if speedup == 1.0:
         return input_path
     
-    print(f"⚡ 视频加速中: {speedup}x")
+    logger.info(f"⚡ 视频加速中: {speedup}x")
     
     # 创建临时文件
     temp_file = tempfile.NamedTemporaryFile(
@@ -125,14 +126,14 @@ def speed_up_video(input_path: str, speedup: float) -> str:
     )
     
     if result.returncode != 0:
-        print(f"⚠️  视频加速失败，使用原始视频")
+        logger.warning(f"⚠️  视频加速失败，使用原始视频")
         try:
             os.unlink(output_path)
         except:
             pass
         return input_path
     
-    print(f"✅ 视频加速完成")
+    logger.info(f"✅ 视频加速完成")
     return output_path
 
 
@@ -186,9 +187,9 @@ def extract_audio(input_path: str, speedup: float = 1.0) -> str:
     Returns:
         音频文件路径（临时文件），失败则返回原路径
     """
-    print(f"🎵 提取音频轨道...")
+    logger.info(f"🎵 提取音频轨道...")
     if speedup != 1.0:
-        print(f"   加速倍数: {speedup}x")
+        logger.info(f"   加速倍数: {speedup}x")
     
     # 创建临时文件
     temp_file = tempfile.NamedTemporaryFile(
@@ -227,7 +228,7 @@ def extract_audio(input_path: str, speedup: float = 1.0) -> str:
     )
     
     if result.returncode != 0:
-        print(f"⚠️  音频提取失败，使用原始视频")
+        logger.warning(f"⚠️  音频提取失败，使用原始视频")
         try:
             os.unlink(output_path)
         except:
@@ -236,7 +237,7 @@ def extract_audio(input_path: str, speedup: float = 1.0) -> str:
     
     # 检查输出文件
     if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-        print(f"⚠️  音频文件无效，使用原始视频")
+        logger.warning(f"⚠️  音频文件无效，使用原始视频")
         try:
             os.unlink(output_path)
         except:
@@ -244,7 +245,7 @@ def extract_audio(input_path: str, speedup: float = 1.0) -> str:
         return input_path
     
     file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"✅ 音频提取完成")
-    print(f"   大小: {file_size_mb:.1f} MB")
+    logger.info(f"✅ 音频提取完成")
+    logger.info(f"   大小: {file_size_mb:.1f} MB")
     
     return output_path

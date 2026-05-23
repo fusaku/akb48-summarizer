@@ -4,11 +4,12 @@
 """
 
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Tuple
 from faster_whisper import WhisperModel
-
+logger = logging.getLogger(__name__)
 
 class Transcriber:
     """Whisper 转录器"""
@@ -44,7 +45,7 @@ class Transcriber:
         
         # 检查文件是否存在
         if not os.path.exists(vocab_path):
-            print(f"⚠️  词汇表文件不存在: {vocab_path}")
+            logger.warning(f"⚠️  词汇表文件不存在: {vocab_path}")
             return '以下は日本語の音声です。'
         
         # 读取词汇
@@ -62,14 +63,14 @@ class Transcriber:
             if terms:
                 vocab_text = '、'.join(terms)
                 prompt = f"以下は日本語の音声です。\n{vocab_text}"
-                print(f"✅ 加载自定义词汇表: {len(terms)} 个词")
+                logger.info(f"✅ 加载自定义词汇表: {len(terms)} 个词")
                 return prompt
             else:
-                print(f"⚠️  词汇表为空")
+                logger.warning(f"⚠️  词汇表为空")
                 return '以下は日本語の音声です。'
                 
         except Exception as e:
-            print(f"⚠️  读取词汇表失败: {e}")
+            logger.error(f"⚠️  读取词汇表失败: {e}")
             return '以下は日本語の音声です。'
     
     def transcribe(self, video_path: str) -> Tuple[str, List[Dict[str, Any]]]:
@@ -82,15 +83,15 @@ class Transcriber:
         Returns:
             (转录文本, 片段列表)
         """
-        print(f"\n📝 步骤 1: 高精度转录")
-        print(f"{'='*70}")
+        logger.info(f"\n📝 步骤 1: 高精度转录")
+        logger.info(f"{'='*70}")
         
         # 加载模型
         if self.model is None:
-            print(f"⏳ 加载Whisper模型: {self.whisper_config['model']}")
-            print(f"   设备: {self.whisper_config['device']}")
-            print(f"   量化: {self.whisper_config['compute_type']}")
-            print(f"   (首次运行会下载~3GB模型)\n")
+            logger.info(f"⏳ 加载Whisper模型: {self.whisper_config['model']}")
+            logger.info(f"   设备: {self.whisper_config['device']}")
+            logger.info(f"   量化: {self.whisper_config['compute_type']}")
+            logger.info(f"   (首次运行会下载~3GB模型)\n")
             
             self.model = WhisperModel(
                 self.whisper_config['model'],
@@ -110,11 +111,11 @@ class Transcriber:
         # 加载自定义词汇表
         initial_prompt = self._load_vocabulary()
         
-        print(f"⏳ 开始转录（最高质量参数）")
-        print(f"   - beam_size: {quality.get('beam_size', 5)}")
-        print(f"   - word_timestamps: 启用")
-        print(f"   - VAD过滤: {'启用' if vad['enabled'] else '禁用'}")
-        print(f"\n   请耐心等待...\n")
+        logger.info(f"⏳ 开始转录（最高质量参数）")
+        logger.info(f"   - beam_size: {quality.get('beam_size', 5)}")
+        logger.info(f"   - word_timestamps: 启用")
+        logger.info(f"   - VAD过滤: {'启用' if vad['enabled'] else '禁用'}")
+        logger.info(f"\n   请耐心等待...\n")
         
         start_time = datetime.now()
         
@@ -156,17 +157,17 @@ class Transcriber:
         elapsed = (datetime.now() - start_time).total_seconds()
         
         # 显示统计
-        print(f"✅ 转录完成！\n")
-        print(f"📊 转录统计:")
-        print(f"   - 语言: {info.language} (置信度: {info.language_probability:.1%})")
-        print(f"   - 时长: {info.duration:.1f}秒 ({info.duration/60:.1f}分钟)")
-        print(f"   - 字符数: {len(transcript):,}")
-        print(f"   - 片段数: {len(segments_list)}")
-        print(f"   - 耗时: {elapsed:.1f}秒 ({elapsed/60:.1f}分钟)")
+        logger.info(f"✅ 转录完成！\n")
+        logger.info(f"📊 转录统计:")
+        logger.info(f"   - 语言: {info.language} (置信度: {info.language_probability:.1%})")
+        logger.info(f"   - 时长: {info.duration:.1f}秒 ({info.duration/60:.1f}分钟)")
+        logger.info(f"   - 字符数: {len(transcript):,}")
+        logger.info(f"   - 片段数: {len(segments_list)}")
+        logger.info(f"   - 耗时: {elapsed:.1f}秒 ({elapsed/60:.1f}分钟)")
         
-        print(f"\n--- 转录预览 ---")
+        logger.info(f"\n--- 转录预览 ---")
         preview = transcript[:300] + "..." if len(transcript) > 300 else transcript
-        print(preview)
-        print(f"--- 预览结束 ---\n")
+        logger.info(preview)
+        logger.info(f"--- 预览结束 ---\n")
         
         return transcript, segments_list

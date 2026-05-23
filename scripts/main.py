@@ -116,22 +116,24 @@ def main():
         logger.info(f"# 进度: {i}/{len(video_files)}")
         logger.info(f"{'#'*70}")
         
+        abs_video_path = os.path.abspath(video_path)
         success = processor.process(video_path)
         
         if success:
             stats['success'] += 1
-            processed_log['videos'][os.path.abspath(video_path)] = {
+            processed_log['videos'][abs_video_path] = {
                 'processed_at': datetime.now().isoformat(),
                 'success': True
             }
             save_processed_log(processed_log, config)
         else:
             stats['failed'] += 1
-            processed_log['videos'][os.path.abspath(video_path)] = {
-                'processed_at': datetime.now().isoformat(),
-                'success': False
-            }
-            save_processed_log(processed_log, config)
+            # 🆕 优化点 2：如果分析/处理失败，绝不写入已处理日志，并在日志中清除它（如果之前存在过）
+            if abs_video_path in processed_log['videos']:
+                processed_log['videos'].pop(abs_video_path)
+                save_processed_log(processed_log, config)
+            
+            logger.warning(f"⚠️  视频 {os.path.basename(video_path)} 处理失败，已从 processed.json 移除（下次运行将自动重试）")
             
             if not continue_on_error:
                 logger.error(f"\n⚠️  出错停止，剩余 {len(video_files) - i} 个视频未处理")

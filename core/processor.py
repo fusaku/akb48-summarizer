@@ -8,6 +8,8 @@ import threading
 import logging
 from typing import Dict, Any, Tuple
 from pathlib import Path
+# 动态引入检验修复函数（不需要改动其他文件的 import）
+from utils.video import check_and_fix_video
 
 from utils import (
     save_results, 
@@ -83,128 +85,108 @@ class VideoProcessor:
             return self._process_whisper(video_path)
     
     def _process_video_direct(self, video_path: str) -> bool:
-        """视频直传模式"""
+        """视频直传模式（极简闪电保底版：不重压视频，云端报错秒切纯音频）"""
         try:
-            # 🆕 获取优化策略
+            # 1. 获取优化策略
             strategy = self.optimizer.get_strategy(video_path)
-            
             if strategy is None:
                 logger.error(f"\n❌ 视频过长，无法处理")
                 return False
             
-            # 🆕 根据策略处理视频
             original_path = video_path
+            video_name = Path(video_path).stem
+            output_dir = self.config['output_dir']
+            os.makedirs(output_dir, exist_ok=True)
+
+            # 文字起こし（转录）缓存处理路径
+            transcript_cache_path = os.path.join(output_dir, f"{video_name}_transcript_cache.txt")
+            transcript_result = None
+            transcribe_enabled = self.config.get('processing', {}).get('transcribe_audio', False)
+
+            # ---- 🚀 独立提前音频转文字并支持复用 ----
+            if transcribe_enabled:
+                if os.path.exists(transcript_cache_path):
+                    logger.warning(f"\nℹ️  检测到已存在该视频的文字起こし缓存，直接复用...")
+                    with open(transcript_cache_path, 'r', encoding='utf-8') as f:
+                        transcript_result = f.read()
+                else:
+                    logger.info(f"\n🎙️  音频文字起こし开始...")
+                    audio_path_for_transcribe = extract_audio(original_path, speedup=1.0)
+                    is_audio_temp = (audio_path_for_transcribe is not None and audio_path_for_transcribe != original_path)
+                    
+                    if audio_path_for_transcribe:
+                        transcript_result = self.model_manager.transcribe_from_audio(audio_path_for_transcribe)
+                        if is_audio_temp:
+                            try: os.unlink(audio_path_for_transcribe)
+                            except: pass
+                        if transcript_result:
+                            with open(transcript_cache_path, 'w', encoding='utf-8') as f:
+                                f.write(transcript_result)
+                            logger.info(f"✅ 文字起こし成功并已保存缓存")
+
+            # ---- 🎬 视频直送处理 ----
             is_temp = False
             processed_path = video_path
             
-            # 处理：加速或提取音频
-            # 并行处理：同时提取视频和音频
-            transcribe_enabled = self.config.get('processing', {}).get('transcribe_audio', False)
-            audio_path_for_transcribe = [None]  # 用list传引用
-            transcript_result_ref = [None]      # 转文字结果
-            
-            def prepare_audio_and_transcribe():
-                if transcribe_enabled:
-                    logger.info(f"   🎵 [并行] 提取文字起こし用音频...")
-                    audio_path = extract_audio(original_path, speedup=1.0)
-                    audio_path_for_transcribe[0] = audio_path
-                    if audio_path:
-                        logger.info(f"   🎙️ [并行] 开始音频转文字...")
-                        transcript_result_ref[0] = self.model_manager.transcribe_from_audio(audio_path)
-                        logger.info(f"   ✅ [并行] 音频转文字完成")
-
-            # 启动音频提取线程
-            audio_thread = threading.Thread(target=prepare_audio_and_transcribe)
-            audio_thread.start()
-
-            # 主线程处理视频（总结用）
             if strategy['audio_only']:
                 logger.info(f"\n🎵 第5档: 提取总结用音频")
-                processed_path = extract_audio(video_path, strategy['speedup'])
+                processed_path = extract_audio(video_path, speedup=1.0)
                 is_temp = (processed_path != original_path)
-            elif strategy['speedup'] != 1.0:
-                logger.info(f"\n⚡ 视频加速: {strategy['speedup']}x")
-                processed_path = speed_up_video(video_path, strategy['speedup'])
-                is_temp = (processed_path != original_path)
-            
-            # 🆕 调用 API 生成（传递 fps 参数）
-            logger.info(f"\n📹 分析{'音频' if strategy['audio_only'] else '视频'}: {os.path.basename(original_path)}")
+
+            # 第一轮：不做任何本地检验或转码，挺起胸膛直接原样投递原始视频文件
+            logger.info(f"\n📹 投递 AI 分析{'音频' if strategy['audio_only'] else '视频'}: {os.path.basename(processed_path)}")
             full_response, model_name, duration = self.model_manager.summarize_from_video(
                 processed_path,
-                fps=strategy['fps']  # 🆕 传递 fps
+                fps=strategy['fps']
             )
-            # 等待音频转文字完成（与视频总结并行执行）
-            logger.info(f"   ⏳ 等待音频转文字完成...")
-            audio_thread.join()
-            logger.info(f"   ✅ 两个任务均完成")
             
-            # 清理临时文件
-            if is_temp:
+            # ---- 🚨 闪电保底：如果原视频投递被 Gemini 云端无情拒绝，秒切纯音频 🚨 ----
+            if not full_response and not strategy['audio_only']:
+                logger.warning(f"⚠️  原始视频在 Gemini 云端处理失败。立刻触发【纯音频闪电保底方案】...")
+                
+                if is_temp and processed_path != original_path:
+                    try: os.unlink(processed_path)
+                    except: pass
+                
+                # 秒抽一条纯音频（不重压画面，仅拷贝/转换音频轨，通常只需1-2秒）
+                logger.info(f"🎵 正在提取标准音频轨道进行二次投递...")
+                processed_path = extract_audio(original_path, speedup=1.0)
+                is_temp = (processed_path != original_path)
+                
+                # 重新用纯音频投递给 Gemini（纯音频不带 fps 参数）
+                full_response, model_name, duration = self.model_manager.summarize_from_video(
+                    processed_path,
+                    fps=None
+                )
+            
+            # ⚠️ 分析完毕，彻底删除本地生成的临时音频文件（原视频保持不动）
+            if is_temp and processed_path != original_path:
                 try:
                     os.unlink(processed_path)
-                    logger.info(f"   🗑️  已清理临时文件")
+                    logger.warning(f"   🗑️  分析完毕：已成功删除本地临时媒体文件")
                 except:
                     pass
                 
             if not full_response:
-                logger.error(f"\n❌ {'音频' if strategy['audio_only'] else '视频'}分析失败")
+                logger.error(f"\n❌ 该视频通过【视频原件】和【纯音频】双重投递均告失败，跳过本视频")
                 return False
             
-            # 分割两个版本
+            # ---- 3. 分割、验证和结果保存逻辑 ----
             detailed_version, youtube_version = Summarizer.parse_dual_summary(full_response)
-            # 🆕 备份原始版本用于保存
             invalid_raw_content = None
             
-            # 2. 验证逻辑
             if not detailed_version or not youtube_version:
                 logger.warning(f"⚠️  分割失败，使用备用方案")
                 detailed_version = full_response
                 youtube_version = generate_youtube_simple(detailed_version)
-                invalid_raw_content = full_response # 保存整个 AI 回复
+                invalid_raw_content = full_response
             elif not Summarizer.validate_youtube_format(youtube_version):
                 logger.warning(f"⚠️  YouTube 版格式验证失败，使用代码生成")
-                invalid_raw_content = youtube_version # 只保存那个格式不对的版本
+                invalid_raw_content = youtube_version
                 youtube_version = generate_youtube_simple(detailed_version)
             
-            # 显示结果
-            logger.info(f"\n{'='*70}")
-            logger.info(f"📋 详细版:")
-            logger.info(f"{'='*70}")
-            logger.info(detailed_version[:400] + "..." if len(detailed_version) > 400 else detailed_version)
-            logger.info(f"{'='*70}\n")
-            
-            logger.info(f"\n{'='*70}")
-            logger.info(f"📺 YouTube 版:")
-            logger.info(f"{'='*70}")
-            logger.info(youtube_version)
-            logger.info(f"{'='*70}\n")
-            
-            # 保存结果
-            # 文字起こし
-            transcript = f"[{'音声のみ' if strategy['audio_only'] else '動画直接分析'}モード - 文字起こしなし]"
+            transcript = transcript_result if transcript_result else f"[{'音声のみ' if strategy['audio_only'] else '動画直接分析'}モード - 文字起こしなし]"
             timeline = []
-
-            transcript_result = None
-            if transcribe_enabled:
-                audio_path = audio_path_for_transcribe[0]
-                transcript_result = transcript_result_ref[0]
-
-                # 两个都结束后再清理音频临时文件
-                if audio_path and audio_path != original_path:
-                    try:
-                        os.unlink(audio_path)
-                        logger.info(f"   🗑️  已清理音频临时文件")
-                    except:
-                        pass
-                    
-                if transcript_result:
-                    transcript = transcript_result
-                    logger.info(f"✅ 文字起こし完了 ({len(transcript_result):,} 文字)")
-                else:
-                    logger.warning(f"⚠️ 文字起こし失敗、スキップ")
-            
-            output_dir = self.config['output_dir']
-            # 从 config 获取开关（默认为 True）
 
             save_raw_enabled = self.config.get('processing', {}).get('save_raw_on_fail', True)
             groq_model = self.config.get('groq', {}).get('model', '')
@@ -216,11 +198,13 @@ class VideoProcessor:
                 raw_content=invalid_raw_content if save_raw_enabled else None,
                 transcript_model=transcript_model
             )
+            logger.info(f"💾 最终结果保存成功！")
             
-            logger.info(f"💾 结果已保存:")
-            logger.info(f"   📄 详细版: {os.path.basename(detailed_txt)}")
-            logger.info(f"   📺 YouTube版: {os.path.basename(youtube_txt)}")
-            
+            # 全部跑通，销毁缓存
+            if os.path.exists(transcript_cache_path):
+                try: os.unlink(transcript_cache_path)
+                except: pass
+
             return True
             
         except Exception as e:

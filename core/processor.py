@@ -8,8 +8,6 @@ import threading
 import logging
 from typing import Dict, Any, Tuple
 from pathlib import Path
-# 动态引入检验修复函数（不需要改动其他文件的 import）
-from utils.video import check_and_fix_video
 
 from utils import (
     save_results, 

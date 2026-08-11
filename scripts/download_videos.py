@@ -109,19 +109,23 @@ class OracleBucketDownloader:
                 if any(obj.name.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
             ]
 
-            # 4. 将本地当前的标记全部吃进内存变量里，下次再进来就不会触发扫描了
-            self.scanned_markers.update(local_marker_names)
-
-            # 5. 精准匹配：只留下【本地有标记】且【云端也有文件】的视频路径
+            # 4. 精准匹配：只留下【本地有标记】且【云端也有文件】的视频路径
             matched_videos = []
+            matched_marker_names = set()
+
             for video_path in bucket_videos:
                 filename = video_path.split('/')[-1]
                 corresponding_marker = f"{filename}.uploaded"
-                
+
                 if corresponding_marker in local_marker_names:
                     matched_videos.append(video_path)
-            
-            return matched_videos  # ← 如果没匹配到，这里自然会返回空列表 []
+                    matched_marker_names.add(corresponding_marker)
+
+            # 5. 【关键修复】只把成功在云端匹配到视频的标记记录到内存中
+            # 没匹配到的标记下次轮询会继续触发云端扫描，直到云端文件出现为止
+            self.scanned_markers.update(matched_marker_names)
+
+            return matched_videos
 
         except Exception as e:
             logger.error(f"❌ 扫描比对失败: {e}")
@@ -176,7 +180,8 @@ class OracleBucketDownloader:
             
         # 情况 B：触发了云端扫描，但是对齐之后没有发现任何可下载文件
         if len(videos) == 0:
-            logger.info("ℹ️  存储桶里没有与本地标记匹配的新视频文件。")
+            logger.info("ℹ️  存储桶里没有与本地标记匹配的新视频文件，等待 60 秒后重试...")
+            time.sleep(60)
             return
 
         # 情况 C：真的有文件需要下载，此时再打印正式的下载横幅

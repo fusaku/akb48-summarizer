@@ -97,7 +97,9 @@ class VideoProcessor:
             os.makedirs(output_dir, exist_ok=True)
 
             # 文字起こし（转录）缓存处理路径
-            transcript_cache_path = os.path.join(output_dir, f"{video_name}_transcript_cache.txt")
+            cache_dir = os.path.join(self.config['output_dir'], "cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            transcript_cache_path = os.path.join(cache_dir, f"audio_transcript_{video_name}.cache")
             transcript_result = None
             transcribe_enabled = self.config.get('processing', {}).get('transcribe_audio', False)
 

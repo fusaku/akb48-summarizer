@@ -96,6 +96,7 @@ class GeminiClient:
         """
         logger.info(f"⏳ 上传视频到 {model_id}...")
         
+        uploaded_file_name = None
         try:
             # 确定 MIME 类型
             ext = os.path.splitext(video_path)[1].lower()
@@ -122,24 +123,32 @@ class GeminiClient:
                 file=video_path,
                 config={'mime_type': mime_type}
             )
+            uploaded_file_name = video_file.name
             
             logger.info(f"   ✅ 上传完成: {video_file.name}")
             
-            # 等待处理
+            # 等待处理（带超时保护）
             logger.info(f"   ⏳ 等待 Gemini 处理视频...")
-            while video_file.state == "PROCESSING":
-                time.sleep(2)
+            max_wait_time = 300
+            wait_interval = 2
+            elapsed_time = 0
+            while video_file.state == "PROCESSING" and elapsed_time < max_wait_time:
+                time.sleep(wait_interval)
+                elapsed_time += wait_interval
                 video_file = self.client.files.get(name=video_file.name)
             
+            if video_file.state == "PROCESSING":
+                logger.error(f"   ❌ 文件在 Gemini 后台处理超时 (超过 {max_wait_time} 秒)")
+                return None, None
+            
             if video_file.state == "FAILED":
-                            # 尝试获取 Google API 返回的详细错误信息
-                            error_msg = "未知错误原因"
-                            if hasattr(video_file, 'error') and video_file.error:
-                                # 如果 error 对象有 message 属性则取 message，否则直接转字符串
-                                error_msg = getattr(video_file.error, 'message', str(video_file.error))
-                            
-                            logger.error(f"   ❌ 文件在 Gemini 后台处理失败: {error_msg}")
-                            return None, None
+                # 尝试获取 Google API 返回的详细错误信息
+                error_msg = "未知错误原因"
+                if hasattr(video_file, 'error') and video_file.error:
+                    error_msg = getattr(video_file.error, 'message', str(video_file.error))
+                
+                logger.error(f"   ❌ 文件在 Gemini 后台处理失败: {error_msg}")
+                return None, None
             
             logger.info(f"   ✅ 视频处理完成")
             
@@ -160,31 +169,27 @@ class GeminiClient:
             # 生成内容
             logger.info(f"   ⏳ 正在分析视频并生成总结...")
             
-            # 🆕 根据 fps 参数决定使用哪种方式
-            if fps is not None:
+            # 区分音频与视频，避免向音频附加 video_metadata
+            is_audio = mime_type.startswith('audio/')
+            if is_audio:
+                logger.info(f"   📊 音频模式投递")
+                file_part = types.Part(file_data=types.FileData(file_uri=video_file.uri))
+            elif fps is not None:
                 # 使用自定义 fps
                 logger.info(f"   📊 使用自定义采样率: {fps} fps")
-                contents = types.Content(
-                    parts=[
-                        types.Part(
-                            file_data=types.FileData(file_uri=video_file.uri),
-                            video_metadata=types.VideoMetadata(fps=fps)  # 🆕 动态 fps
-                        ),
-                        types.Part(text=prompt)
-                    ]
+                file_part = types.Part(
+                    file_data=types.FileData(file_uri=video_file.uri),
+                    video_metadata=types.VideoMetadata(fps=fps)
                 )
             else:
-                # 使用默认 fps（Gemini 自动决定）
+                # 使用默认 fps（1.0 fps）
                 logger.info(f"   📊 使用默认采样率（1.0 fps）")
-                contents = types.Content(
-                    parts=[
-                        types.Part(
-                            file_data=types.FileData(file_uri=video_file.uri),
-                            video_metadata=types.VideoMetadata(fps=1.0)  # 🆕 明确设置 1.0
-                        ),
-                        types.Part(text=prompt)
-                    ]
+                file_part = types.Part(
+                    file_data=types.FileData(file_uri=video_file.uri),
+                    video_metadata=types.VideoMetadata(fps=1.0)
                 )
+
+            contents = types.Content(parts=[file_part, types.Part(text=prompt)])
             
             response = self.client.models.generate_content(
                 model=model_id,
@@ -201,18 +206,13 @@ class GeminiClient:
             # 验证响应
             if not response or not response.text:
                 logger.warning(f"⚠️ API返回空内容")
-                self._cleanup_file(video_file.name)
                 return None, None
             
             # 检查安全过滤
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                 if hasattr(response.prompt_feedback, 'block_reason') and response.prompt_feedback.block_reason:
                     logger.warning(f"⚠️ 内容被过滤: {response.prompt_feedback.block_reason}")
-                    self._cleanup_file(video_file.name)
                     return None, None
-            
-            # 清理上传的文件
-            self._cleanup_file(video_file.name)
             
             return response.text.strip(), duration
             
@@ -221,6 +221,10 @@ class GeminiClient:
             import traceback
             traceback.print_exc()
             return None, None
+        finally:
+            # 无论成功、失败或异常，统一保证清理已上传的云端文件
+            if uploaded_file_name:
+                self._cleanup_file(uploaded_file_name)
     
     def _cleanup_file(self, file_name: str):
         """

@@ -27,14 +27,16 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # 配置路径处理
 def resolve_path(path_str: str) -> Path:
     """解析路径(支持相对路径和绝对路径)"""
+    if not path_str:
+        return PROJECT_ROOT
     path = Path(path_str).expanduser()
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path
 
-VIDEOS_DIR = resolve_path(config['input']['video_folder'])
+VIDEOS_DIR = resolve_path(config.get('input', {}).get('video_folder', './videos'))
 OUTPUTS_DIR = resolve_path(yt_config.get('source_dir', './outputs'))
-CREDENTIALS_DIR = resolve_path(yt_config.get('credentials_dir'))
+CREDENTIALS_DIR = resolve_path(yt_config.get('credentials_dir', './config/credentials/autoupsr'))
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 
 def get_youtube_client():

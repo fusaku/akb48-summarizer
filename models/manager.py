@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 import time
 import requests
 import json
@@ -382,7 +383,8 @@ class ModelManager:
                         data = json.loads(line)
                         token = data.get('response', '')
                         summary += token
-                        logger.info(token, end='', flush=True)
+                        sys.stdout.write(token)
+                        sys.stdout.flush()
                         
                         if data.get('done', False):
                             break

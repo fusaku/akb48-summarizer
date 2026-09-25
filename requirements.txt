@@ -5,17 +5,25 @@ pyyaml>=6.0
 # Whisper 转录
 faster-whisper>=1.0.0
 
-# Gemini API
-google-generativeai>=0.8.0
+# Gemini 官方新版 API
+google-genai>=0.1.1
+# 旧版 API（已弃用，保留备查）：google-generativeai>=0.8.0
 
 # ==================== 工具依赖 ====================
 # 监控守护进程
 watchdog>=3.0.0
 
-# HTTP 请求（Ollama）
+# HTTP 请求（Groq / Ollama）
 requests>=2.31.0
 
-# ==================== 可选依赖 ====================
+# ==================== 可选扩展依赖 ====================
+# Oracle Cloud 对象存储下载与自动清理（download_videos.py & main.py）
+# oci>=2.120.0
+
+# YouTube 视频简介自动更新（update_description.py）
+# google-auth-oauthlib>=1.0.0
+# google-api-python-client>=2.0.0
+
 # 如果需要 GPU 加速 Whisper（可选）
 # torch>=2.0.0
 # torchaudio>=2.0.0

@@ -276,8 +276,9 @@ class GroqTranscriber:
         """
         TIMESTAMP_INTERVAL = 300  # 5分ごとにタイムスタンプ
 
+        start_index = self.current_key_index
         for attempt in range(len(self.api_keys)):
-            key_index = (self.current_key_index + attempt) % len(self.api_keys)
+            key_index = (start_index + attempt) % len(self.api_keys)
             api_key = self.api_keys[key_index]
 
             logger.info(f"      📤 送信中 [キー {key_index+1}/{len(self.api_keys)}] ...")

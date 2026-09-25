@@ -5,7 +5,6 @@
 
 import os
 import sys
-import oci
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -235,6 +234,7 @@ def cleanup_bucket_after_processing(config):
         download_folder = Path(oracle_config.get('download_folder', './videos')).expanduser()
         
         # 连接 Oracle
+        import oci
         oci_config = oci.config.from_file()
         client = oci.object_storage.ObjectStorageClient(oci_config)
         
